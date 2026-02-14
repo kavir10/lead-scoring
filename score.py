@@ -1,30 +1,100 @@
 """
-Phase 3: Score and rank leads
+Phase 3: Score and rank leads using SHAP-aligned weights
 """
 import numpy as np
 import pandas as pd
 from config import SCORING_WEIGHTS
 
 
-def score_reviews(count: int) -> float:
-    """Score review count 0-1. More reviews = likely more revenue/traffic."""
-    if count >= 1000:
+def score_reservation_difficulty(value: int) -> float:
+    """Score reservation difficulty 0-1.
+    0=none, 1=OpenTable, 2=Resy, 3=Tock. Harder reservations = stronger signal.
+    """
+    mapping = {3: 1.0, 2: 0.7, 1: 0.4, 0: 0.0}
+    return mapping.get(value, 0.0)
+
+
+def score_avg_video_views(count: int) -> float:
+    """Score average Instagram Reels / TikTok views 0-1."""
+    if count >= 100_000:
         return 1.0
-    elif count >= 500:
+    elif count >= 50_000:
         return 0.9
-    elif count >= 250:
+    elif count >= 20_000:
         return 0.8
-    elif count >= 100:
+    elif count >= 10_000:
         return 0.6
-    elif count >= 50:
+    elif count >= 5_000:
         return 0.4
-    elif count >= 25:
+    elif count >= 1_000:
+        return 0.2
+    elif count > 0:
+        return 0.1
+    return 0.0
+
+
+def score_follower_count(count: int) -> float:
+    """Score combined social followers 0-1."""
+    if count >= 100_000:
+        return 1.0
+    elif count >= 50_000:
+        return 0.9
+    elif count >= 20_000:
+        return 0.8
+    elif count >= 10_000:
+        return 0.7
+    elif count >= 5_000:
+        return 0.5
+    elif count >= 2_000:
+        return 0.3
+    elif count >= 500:
+        return 0.1
+    return 0.0
+
+
+def score_press_mentions(count: int) -> float:
+    """Score number of press / food-media mentions 0-1."""
+    if count >= 10:
+        return 1.0
+    elif count >= 7:
+        return 0.8
+    elif count >= 5:
+        return 0.6
+    elif count >= 3:
+        return 0.4
+    elif count >= 1:
+        return 0.2
+    return 0.0
+
+
+def score_awards_count(count: int) -> float:
+    """Score James Beard, Michelin, and similar awards 0-1."""
+    if count >= 3:
+        return 1.0
+    elif count == 2:
+        return 0.8
+    elif count == 1:
+        return 0.5
+    return 0.0
+
+
+def score_domain_age(years: float) -> float:
+    """Score domain age in years 0-1. Older domains = more established."""
+    if years >= 10:
+        return 1.0
+    elif years >= 7:
+        return 0.8
+    elif years >= 5:
+        return 0.6
+    elif years >= 3:
+        return 0.4
+    elif years >= 1:
         return 0.2
     return 0.1
 
 
-def score_rating(rating) -> float:
-    """Score rating 0-1. Higher is better."""
+def score_google_rating(rating) -> float:
+    """Score Google rating 0-1. Higher is better."""
     if rating is None or rating == 0:
         return 0.0
     if rating >= 4.7:
@@ -40,57 +110,43 @@ def score_rating(rating) -> float:
     return 0.1
 
 
-def score_ig_followers(count: int) -> float:
-    """Score Instagram followers 0-1."""
-    if count >= 50000:
+def score_avg_likes(count: int) -> float:
+    """Score average likes per post 0-1."""
+    if count >= 5_000:
         return 1.0
-    elif count >= 20000:
-        return 0.9
-    elif count >= 10000:
+    elif count >= 2_000:
         return 0.8
-    elif count >= 5000:
-        return 0.7
-    elif count >= 2000:
-        return 0.5
-    elif count >= 1000:
-        return 0.3
+    elif count >= 1_000:
+        return 0.6
     elif count >= 500:
-        return 0.2
-    elif count > 0:
-        return 0.1
-    return 0.0
-
-
-def score_ig_posts(count: int) -> float:
-    """Score Instagram post count 0-1. Active posting = engaged brand."""
-    if count >= 500:
-        return 1.0
+        return 0.4
     elif count >= 200:
-        return 0.8
-    elif count >= 100:
-        return 0.6
-    elif count >= 50:
-        return 0.4
-    elif count > 0:
-        return 0.2
-    return 0.0
-
-
-def score_fb_likes(count: int) -> float:
-    """Score Facebook likes 0-1."""
-    if count >= 20000:
-        return 1.0
-    elif count >= 10000:
-        return 0.8
-    elif count >= 5000:
-        return 0.6
-    elif count >= 2000:
-        return 0.4
-    elif count >= 500:
         return 0.2
     elif count > 0:
         return 0.1
     return 0.0
+
+
+def score_price_tier(tier: int) -> float:
+    """Score price tier ($ count) 0-1. Higher price = stronger lead signal."""
+    mapping = {4: 1.0, 3: 0.7, 2: 0.4, 1: 0.2}
+    return mapping.get(tier, 0.0)
+
+
+# ---------------------------------------------------------------------------
+# Map each weight key -> (scoring function, DataFrame column name)
+# ---------------------------------------------------------------------------
+_SCORE_DISPATCH = {
+    "reservation_difficulty": (score_reservation_difficulty, "reservation_difficulty"),
+    "avg_video_views":        (score_avg_video_views,        "avg_video_views"),
+    "follower_count":         (score_follower_count,         "follower_count"),
+    "press_mentions":         (score_press_mentions,         "press_mentions"),
+    "awards_count":           (score_awards_count,           "awards_count"),
+    "domain_age":             (score_domain_age,             "domain_age"),
+    "google_rating":          (score_google_rating,          "rating"),
+    "avg_likes":              (score_avg_likes,              "avg_likes"),
+    "price_tier":             (score_price_tier,             "price_tier"),
+}
 
 
 def compute_lead_score(row: pd.Series) -> float:
@@ -98,15 +154,14 @@ def compute_lead_score(row: pd.Series) -> float:
     w = SCORING_WEIGHTS
     score = 0.0
 
-    score += score_reviews(row.get("review_count", 0)) * w["review_count"]
-    score += score_rating(row.get("rating")) * w["rating"]
-    score += score_ig_followers(row.get("ig_followers", 0)) * w["instagram_followers"]
-    score += score_ig_posts(row.get("ig_posts", 0)) * w["instagram_posts"]
-    score += score_fb_likes(row.get("fb_likes", 0)) * w["facebook_likes"]
+    # Numeric / tiered signals
+    for weight_key, (fn, col) in _SCORE_DISPATCH.items():
+        default = None if col == "rating" else 0
+        score += fn(row.get(col, default)) * w[weight_key]
+
+    # Boolean signals
     score += (1.0 if row.get("has_email_signup") else 0.0) * w["has_email_signup"]
     score += (1.0 if row.get("has_ecommerce") else 0.0) * w["has_ecommerce"]
-    score += (1.0 if row.get("has_online_ordering") else 0.0) * w["has_online_ordering"]
-    score += (1.0 if row.get("website_reachable") else 0.0) * w["website_quality"]
 
     return round(score, 1)
 
@@ -140,8 +195,11 @@ def score_leads(df: pd.DataFrame) -> pd.DataFrame:
         print(f"  {tier}: {count}")
 
     print(f"\nTop 20 leads:")
-    top_cols = ["name", "address", "lead_score", "tier", "review_count", "rating",
-                "ig_followers", "has_email_signup", "has_ecommerce"]
+    top_cols = [
+        "name", "address", "business_type", "lead_score", "tier",
+        "reservation_difficulty", "follower_count", "press_mentions",
+        "awards_count",
+    ]
     available_cols = [c for c in top_cols if c in df.columns]
     print(df[available_cols].head(20).to_string())
 

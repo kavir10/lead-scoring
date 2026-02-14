@@ -3,13 +3,14 @@ Phase 2: Enrich leads with website analysis, social media data
 """
 import re
 import time
+from datetime import datetime
 import requests
 from urllib.parse import urljoin, urlparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from bs4 import BeautifulSoup
 import pandas as pd
 from apify_client import ApifyClient
-from config import APIFY_API_TOKEN
+from config import APIFY_API_TOKEN, RESERVATION_PLATFORMS
 
 
 # ─── Website Analysis ────────────────────────────────────────────────
@@ -48,6 +49,8 @@ def analyze_website(url: str) -> dict:
         "ecommerce_platform": "",
         "email_platform": "",
         "page_title": "",
+        "reservation_difficulty": 0,
+        "domain_age": 0,
     }
 
     if not url:
@@ -114,6 +117,29 @@ def analyze_website(url: str) -> dict:
                 result["has_online_ordering"] = True
                 break
 
+        # Check for reservation platforms
+        for a_tag in soup.find_all("a", href=True):
+            href = a_tag["href"].lower()
+            for platform, difficulty in RESERVATION_PLATFORMS.items():
+                if platform in href:
+                    result["reservation_difficulty"] = max(
+                        result["reservation_difficulty"], difficulty
+                    )
+
+        # Domain age via python-whois
+        try:
+            import whois
+            domain = urlparse(url).netloc.replace("www.", "")
+            w = whois.whois(domain)
+            if w.creation_date:
+                created = w.creation_date
+                if isinstance(created, list):
+                    created = created[0]
+                age_years = (datetime.now() - created).days / 365.25
+                result["domain_age"] = round(age_years, 1)
+        except Exception:
+            pass
+
         # Also check a few subpages if we find links to /shop, /order, /products
         shop_paths = []
         for a_tag in soup.find_all("a", href=True):
@@ -176,7 +202,8 @@ def enrich_websites(df: pd.DataFrame) -> pd.DataFrame:
     # Merge results into DataFrame
     for col in ["website_reachable", "has_ecommerce", "has_email_signup",
                 "has_online_ordering", "instagram_url", "facebook_url",
-                "ecommerce_platform", "email_platform", "page_title"]:
+                "ecommerce_platform", "email_platform", "page_title",
+                "reservation_difficulty", "domain_age"]:
         df[col] = df.index.map(lambda i: results.get(i, {}).get(col, ""))
 
     reachable = df["website_reachable"].sum()
@@ -239,6 +266,8 @@ def scrape_instagram_batch(usernames: list[str]) -> dict:
                 "ig_bio": item.get("biography", ""),
                 "ig_is_verified": item.get("verified", False),
                 "ig_is_business": item.get("isBusinessAccount", False),
+                "avg_video_views": item.get("avgVideoViews", 0) or 0,
+                "avg_likes": item.get("avgLikes", 0) or 0,
             }
 
         print(f"  Got data for {len(results)} Instagram profiles")
@@ -280,7 +309,7 @@ def enrich_instagram(df: pd.DataFrame) -> pd.DataFrame:
             time.sleep(2)
 
     # Merge into DataFrame
-    for col in ["ig_followers", "ig_posts", "ig_is_business"]:
+    for col in ["ig_followers", "ig_posts", "ig_is_business", "avg_video_views", "avg_likes"]:
         default = 0 if col != "ig_is_business" else False
         df[col] = df["ig_username"].apply(
             lambda u: all_ig_data.get(u.lower(), {}).get(col, default) if u else default
@@ -358,11 +387,146 @@ def enrich_facebook(df: pd.DataFrame) -> pd.DataFrame:
     has_likes = (df["fb_likes"] > 0).sum()
     print(f"  Pages with like data: {has_likes}")
 
+    # Compute combined follower count for scoring
+    ig = df["ig_followers"].fillna(0).astype(int) if "ig_followers" in df.columns else 0
+    fb = df["fb_likes"].fillna(0).astype(int)
+    df["follower_count"] = ig + fb
+
+    return df
+
+
+# ─── Press & Awards Enrichment via Serper ─────────────────────────
+
+def search_press_mentions(business_name: str, city: str) -> dict:
+    """Search Serper for press coverage on food media sites."""
+    from config import SERPER_API_KEY, PRESS_DOMAINS
+
+    result = {"press_mentions": 0, "press_sources": ""}
+
+    site_query = " OR ".join(f"site:{d}" for d in PRESS_DOMAINS)
+    query = f'"{business_name}" ({site_query})'
+
+    try:
+        resp = requests.post(
+            "https://google.serper.dev/search",
+            json={"q": query, "num": 10},
+            headers={"X-API-KEY": SERPER_API_KEY, "Content-Type": "application/json"},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        organic = data.get("organic", [])
+
+        sources = set()
+        for r in organic:
+            link = r.get("link", "")
+            for domain in PRESS_DOMAINS:
+                if domain in link:
+                    sources.add(domain)
+
+        result["press_mentions"] = len(organic)
+        result["press_sources"] = ", ".join(sorted(sources))
+    except Exception:
+        pass
+
+    return result
+
+
+def search_awards(business_name: str, city: str) -> dict:
+    """Search for James Beard, Michelin, and other food awards."""
+    from config import SERPER_API_KEY
+
+    result = {"awards_count": 0, "awards_list": ""}
+
+    award_keywords = ["James Beard", "Michelin", "best new restaurant", "Food & Wine best"]
+    query = f'"{business_name}" {city} ({" OR ".join(award_keywords)})'
+
+    try:
+        resp = requests.post(
+            "https://google.serper.dev/search",
+            json={"q": query, "num": 10},
+            headers={"X-API-KEY": SERPER_API_KEY, "Content-Type": "application/json"},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        organic = data.get("organic", [])
+
+        awards_found = set()
+        for r in organic:
+            title = (r.get("title", "") + " " + r.get("snippet", "")).lower()
+            if "james beard" in title:
+                awards_found.add("James Beard")
+            if "michelin" in title:
+                awards_found.add("Michelin")
+            if "best new restaurant" in title:
+                awards_found.add("Best New Restaurant")
+
+        result["awards_count"] = len(awards_found)
+        result["awards_list"] = ", ".join(sorted(awards_found))
+    except Exception:
+        pass
+
+    return result
+
+
+def enrich_press_and_awards(df: pd.DataFrame) -> pd.DataFrame:
+    """Enrich leads with press mentions and awards data."""
+    print(f"\n{'='*60}")
+    print(f"PHASE 2d: SEARCHING PRESS & AWARDS")
+    print(f"{'='*60}")
+    print(f"  Searching {len(df)} businesses for press coverage and awards...")
+
+    press_results = {}
+    awards_results = {}
+
+    def process_press(idx, name, city):
+        return idx, search_press_mentions(name, city)
+
+    def process_awards(idx, name, city):
+        return idx, search_awards(name, city)
+
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        futures = {
+            executor.submit(process_press, idx, row["name"], row.get("search_city", "")): idx
+            for idx, row in df.iterrows()
+        }
+        done = 0
+        for future in as_completed(futures):
+            idx, data = future.result()
+            press_results[idx] = data
+            done += 1
+            if done % 25 == 0:
+                print(f"  Press: {done}/{len(df)}...")
+
+        time.sleep(1)
+
+        futures = {
+            executor.submit(process_awards, idx, row["name"], row.get("search_city", "")): idx
+            for idx, row in df.iterrows()
+        }
+        done = 0
+        for future in as_completed(futures):
+            idx, data = future.result()
+            awards_results[idx] = data
+            done += 1
+            if done % 25 == 0:
+                print(f"  Awards: {done}/{len(df)}...")
+
+    df["press_mentions"] = df.index.map(lambda i: press_results.get(i, {}).get("press_mentions", 0))
+    df["press_sources"] = df.index.map(lambda i: press_results.get(i, {}).get("press_sources", ""))
+    df["awards_count"] = df.index.map(lambda i: awards_results.get(i, {}).get("awards_count", 0))
+    df["awards_list"] = df.index.map(lambda i: awards_results.get(i, {}).get("awards_list", ""))
+
+    has_press = (df["press_mentions"] > 0).sum()
+    has_awards = (df["awards_count"] > 0).sum()
+    print(f"\n  Leads with press mentions: {has_press}")
+    print(f"  Leads with awards: {has_awards}")
+
     return df
 
 
 if __name__ == "__main__":
-    # Test with a known butcher shop
     result = analyze_website("https://www.publicanqualitymeats.com")
     for k, v in result.items():
         print(f"  {k}: {v}")

@@ -1,5 +1,5 @@
 """
-Lead Scoring Pipeline for Independent Butcher Shops
+Lead Scoring Pipeline for Independent Food Businesses
 Find, enrich, and score leads for Table22 subscription program outreach.
 
 Usage:
@@ -15,8 +15,8 @@ from datetime import datetime
 
 import pandas as pd
 
-from discover import discover_butchers
-from enrich import enrich_websites, enrich_instagram, enrich_facebook
+from discover import discover_leads
+from enrich import enrich_websites, enrich_instagram, enrich_facebook, enrich_press_and_awards
 from score import score_leads
 
 
@@ -28,11 +28,11 @@ def ensure_output_dir():
 
 
 def run_discovery() -> pd.DataFrame:
-    """Phase 1: Find butcher shops."""
-    df = discover_butchers()
+    """Phase 1: Find leads."""
+    df = discover_leads()
 
     if df.empty:
-        print("\nNo butcher shops found. Check API key and try again.")
+        print("\nNo leads found. Check API key and try again.")
         sys.exit(1)
 
     ensure_output_dir()
@@ -60,6 +60,12 @@ def run_enrichment(df: pd.DataFrame) -> pd.DataFrame:
 
     df = enrich_facebook(df)
 
+    path = os.path.join(OUTPUT_DIR, "2_enriched_social.csv")
+    df.to_csv(path, index=False)
+    print(f"\nSaved social enrichment to {path}")
+
+    df = enrich_press_and_awards(df)
+
     path = os.path.join(OUTPUT_DIR, "2_enriched_full.csv")
     df.to_csv(path, index=False)
     print(f"\nSaved full enrichment to {path}")
@@ -84,13 +90,14 @@ def run_scoring(df: pd.DataFrame) -> pd.DataFrame:
 
     # Clean output columns for the final list
     output_cols = [
-        "name", "address", "phone", "website", "lead_score", "tier",
-        "rating", "review_count",
-        "instagram_url", "ig_followers", "ig_posts",
+        "name", "address", "phone", "website", "business_type",
+        "lead_score", "tier",
+        "reservation_difficulty", "follower_count", "avg_video_views",
+        "press_mentions", "press_sources", "awards_count", "awards_list",
+        "domain_age", "rating", "avg_likes", "price_tier",
+        "instagram_url", "ig_followers",
         "facebook_url", "fb_likes",
-        "has_email_signup", "email_platform",
-        "has_ecommerce", "ecommerce_platform",
-        "has_online_ordering",
+        "has_email_signup", "has_ecommerce",
     ]
     available_cols = [c for c in output_cols if c in df_top.columns]
 
@@ -102,15 +109,15 @@ def run_scoring(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Butcher Shop Lead Scorer")
+    parser = argparse.ArgumentParser(description="Lead Scorer")
     parser.add_argument("--discover", action="store_true", help="Only run discovery")
     parser.add_argument("--enrich", type=str, help="Enrich from existing CSV path")
     parser.add_argument("--score", type=str, help="Score from existing CSV path")
     args = parser.parse_args()
 
     print(f"\n{'#'*60}")
-    print(f"  BUTCHER SHOP LEAD SCORING PIPELINE")
-    print(f"  Finding subscription-ready independent butcher shops")
+    print(f"  LEAD SCORING PIPELINE")
+    print(f"  Finding subscription-ready independent food businesses")
     print(f"  {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"{'#'*60}")
 
