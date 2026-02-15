@@ -10,7 +10,12 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from bs4 import BeautifulSoup
 import pandas as pd
 from apify_client import ApifyClient
-from config import APIFY_API_TOKEN, RESERVATION_PLATFORMS
+from config import (
+    APIFY_API_TOKEN, RESERVATION_PLATFORMS,
+    APIFY_ACTOR_GOOGLE_REVIEWS, APIFY_ACTOR_IG_REELS, APIFY_ACTOR_IG_POSTS,
+    APIFY_ACTOR_OPENTABLE, RESERVATION_DIFFICULTY_KEYWORDS,
+    GOOGLE_REVIEWS_MAX_PER_PLACE, RESY_API_BASE, RESY_API_KEY,
+)
 
 
 # ─── Website Analysis ────────────────────────────────────────────────
@@ -50,6 +55,7 @@ def analyze_website(url: str) -> dict:
         "email_platform": "",
         "page_title": "",
         "reservation_difficulty": 0,
+        "reservation_url": "",
         "domain_age": 0,
     }
 
@@ -117,28 +123,14 @@ def analyze_website(url: str) -> dict:
                 result["has_online_ordering"] = True
                 break
 
-        # Check for reservation platforms
+        # Check for reservation platforms and capture booking URL
         for a_tag in soup.find_all("a", href=True):
             href = a_tag["href"].lower()
             for platform, difficulty in RESERVATION_PLATFORMS.items():
                 if platform in href:
-                    result["reservation_difficulty"] = max(
-                        result["reservation_difficulty"], difficulty
-                    )
-
-        # Domain age via python-whois
-        try:
-            import whois
-            domain = urlparse(url).netloc.replace("www.", "")
-            w = whois.whois(domain)
-            if w.creation_date:
-                created = w.creation_date
-                if isinstance(created, list):
-                    created = created[0]
-                age_years = (datetime.now() - created).days / 365.25
-                result["domain_age"] = round(age_years, 1)
-        except Exception:
-            pass
+                    if difficulty > result["reservation_difficulty"]:
+                        result["reservation_difficulty"] = difficulty
+                        result["reservation_url"] = a_tag["href"].strip()
 
         # Also check a few subpages if we find links to /shop, /order, /products
         shop_paths = []
@@ -203,7 +195,7 @@ def enrich_websites(df: pd.DataFrame) -> pd.DataFrame:
     for col in ["website_reachable", "has_ecommerce", "has_email_signup",
                 "has_online_ordering", "instagram_url", "facebook_url",
                 "ecommerce_platform", "email_platform", "page_title",
-                "reservation_difficulty", "domain_age"]:
+                "reservation_difficulty", "reservation_url", "domain_age"]:
         df[col] = df.index.map(lambda i: results.get(i, {}).get(col, ""))
 
     reachable = df["website_reachable"].sum()
@@ -522,6 +514,411 @@ def enrich_press_and_awards(df: pd.DataFrame) -> pd.DataFrame:
     has_awards = (df["awards_count"] > 0).sum()
     print(f"\n  Leads with press mentions: {has_press}")
     print(f"  Leads with awards: {has_awards}")
+
+    return df
+
+
+# ─── Google Reviews & Reservation Sentiment ──────────────────────────
+
+def analyze_reservation_difficulty_from_reviews(reviews: list[dict]) -> tuple[float, list[str]]:
+    """Analyze review texts for reservation difficulty mentions.
+
+    Handles both Serper format (snippet field) and Apify format (text field).
+    Returns (score 0-1, sample of matching review texts).
+    """
+    if not reviews:
+        return 0.0, []
+
+    mentions = 0
+    samples = []
+
+    for review in reviews:
+        text = (review.get("snippet") or review.get("text") or review.get("textTranslated") or "").lower()
+        if not text:
+            continue
+        for keyword in RESERVATION_DIFFICULTY_KEYWORDS:
+            if keyword in text:
+                mentions += 1
+                if len(samples) < 3:
+                    samples.append(text[:200])
+                break
+
+    total = len(reviews)
+    if total == 0:
+        return 0.0, []
+
+    mention_ratio = mentions / total
+    score = min(1.0, mention_ratio * 5)  # 20%+ mention rate = 1.0
+    return round(score, 3), samples
+
+
+def _fetch_serper_reviews(cid: str) -> list[dict]:
+    """Fetch reviews for a single place via Serper Reviews API."""
+    from config import SERPER_API_KEY
+    try:
+        resp = requests.post(
+            "https://google.serper.dev/reviews",
+            json={"cid": str(cid), "num": 10},
+            headers={"X-API-KEY": SERPER_API_KEY, "Content-Type": "application/json"},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        return resp.json().get("reviews", [])
+    except Exception:
+        return []
+
+
+def enrich_google_reviews(df: pd.DataFrame) -> pd.DataFrame:
+    """Enrich leads with Google Reviews data and reservation sentiment via Serper."""
+    print(f"\n{'='*60}")
+    print(f"PHASE 2e: FETCHING GOOGLE REVIEWS (Serper)")
+    print(f"{'='*60}")
+
+    # Only process rows with a CID (Google Maps identifier)
+    mask = df["cid"].astype(str).str.strip().ne("")
+    cid_indices = df.loc[mask].index.tolist()
+
+    if not cid_indices:
+        print("  No CIDs found — skipping Google Reviews enrichment")
+        df["review_difficulty_sentiment"] = 0.0
+        df["review_texts_sample"] = ""
+        return df
+
+    print(f"  Found {len(cid_indices)} places with CIDs")
+    print(f"  Fetching ~10 reviews each via Serper Reviews API...")
+
+    all_reviews = {}  # cid_str -> list of review dicts
+
+    def fetch_reviews(idx):
+        cid_val = str(df.at[idx, "cid"])
+        reviews = _fetch_serper_reviews(cid_val)
+        return idx, cid_val, reviews
+
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        futures = {executor.submit(fetch_reviews, idx): idx for idx in cid_indices}
+        done = 0
+        for future in as_completed(futures):
+            idx, cid_val, reviews = future.result()
+            if reviews:
+                all_reviews[cid_val] = reviews
+            done += 1
+            if done % 100 == 0:
+                print(f"  Fetched reviews for {done}/{len(cid_indices)} places ({len(all_reviews)} with data)...")
+
+    print(f"  Fetched reviews for {done}/{len(cid_indices)} places total ({len(all_reviews)} with data)")
+
+    # Analyze sentiment and merge
+    sentiments = {}
+    samples = {}
+    for cid_val, reviews in all_reviews.items():
+        score, sample_texts = analyze_reservation_difficulty_from_reviews(reviews)
+        sentiments[cid_val] = score
+        samples[cid_val] = " | ".join(sample_texts) if sample_texts else ""
+
+    df["review_difficulty_sentiment"] = df["cid"].astype(str).map(
+        lambda c: sentiments.get(c, 0.0)
+    )
+    df["review_texts_sample"] = df["cid"].astype(str).map(
+        lambda c: samples.get(c, "")
+    )
+
+    has_sentiment = (df["review_difficulty_sentiment"] > 0).sum()
+    print(f"\n  Places with reservation difficulty mentions in reviews: {has_sentiment}")
+
+    return df
+
+
+# ─── Instagram Reels (avg_video_views) ───────────────────────────────
+
+def enrich_instagram_reels(df: pd.DataFrame) -> pd.DataFrame:
+    """Enrich leads with actual avg_video_views from Instagram Reels."""
+    print(f"\n{'='*60}")
+    print(f"PHASE 2f: SCRAPING INSTAGRAM REELS")
+    print(f"{'='*60}")
+
+    mask = df["ig_username"].astype(str).str.strip().ne("")
+    usernames = df.loc[mask, "ig_username"].tolist()
+
+    if not usernames:
+        print("  No Instagram profiles — skipping Reels enrichment")
+        return df
+
+    print(f"  Found {len(usernames)} profiles to scrape Reels for")
+
+    client = ApifyClient(APIFY_API_TOKEN)
+    all_views = {}  # username -> avg views
+
+    batch_size = 30
+    for i in range(0, len(usernames), batch_size):
+        batch = usernames[i:i + batch_size]
+        batch_num = i // batch_size + 1
+        total_batches = (len(usernames) - 1) // batch_size + 1
+        print(f"\n  Batch {batch_num}/{total_batches} ({len(batch)} profiles)")
+
+        run_input = {
+            "username": batch,
+            "resultsLimit": 12,
+        }
+
+        try:
+            run = client.actor(APIFY_ACTOR_IG_REELS).call(run_input=run_input)
+            items = client.dataset(run["defaultDatasetId"]).list_items().items
+
+            # Group reels by username
+            reels_by_user = {}
+            for item in items:
+                owner = (item.get("ownerUsername") or "").lower()
+                views = item.get("videoViewCount") or item.get("playCount") or 0
+                if owner and views > 0:
+                    reels_by_user.setdefault(owner, []).append(views)
+
+            for user, views_list in reels_by_user.items():
+                if views_list:
+                    all_views[user] = sum(views_list) / len(views_list)
+
+            print(f"  Got Reels data for {len(all_views)} profiles so far")
+        except Exception as e:
+            print(f"  [ERROR] Instagram Reels batch failed: {e}")
+
+        if i + batch_size < len(usernames):
+            time.sleep(3)
+
+    # Overwrite avg_video_views with actual computed average where available
+    existing = df["avg_video_views"] if "avg_video_views" in df.columns else 0
+    df["avg_video_views"] = df["ig_username"].apply(
+        lambda u: all_views.get(u.lower(), 0) if u else 0
+    )
+    # Keep existing values for profiles where the scraper didn't return data
+    if isinstance(existing, pd.Series):
+        no_new_data = (df["avg_video_views"] == 0) & (existing > 0)
+        df.loc[no_new_data, "avg_video_views"] = existing[no_new_data]
+
+    has_views = (df["avg_video_views"] > 0).sum()
+    print(f"\n  Profiles with Reels view data: {has_views}")
+
+    return df
+
+
+# ─── Instagram Posts (avg_likes) ─────────────────────────────────────
+
+def enrich_instagram_posts(df: pd.DataFrame) -> pd.DataFrame:
+    """Enrich leads with actual avg_likes from Instagram Posts."""
+    print(f"\n{'='*60}")
+    print(f"PHASE 2g: SCRAPING INSTAGRAM POSTS")
+    print(f"{'='*60}")
+
+    mask = df["ig_username"].astype(str).str.strip().ne("")
+    usernames = df.loc[mask, "ig_username"].tolist()
+
+    if not usernames:
+        print("  No Instagram profiles — skipping Posts enrichment")
+        return df
+
+    print(f"  Found {len(usernames)} profiles to scrape Posts for")
+
+    client = ApifyClient(APIFY_API_TOKEN)
+    all_likes = {}  # username -> avg likes
+
+    batch_size = 30
+    for i in range(0, len(usernames), batch_size):
+        batch = usernames[i:i + batch_size]
+        batch_num = i // batch_size + 1
+        total_batches = (len(usernames) - 1) // batch_size + 1
+        print(f"\n  Batch {batch_num}/{total_batches} ({len(batch)} profiles)")
+
+        run_input = {
+            "username": batch,
+            "resultsLimit": 12,
+        }
+
+        try:
+            run = client.actor(APIFY_ACTOR_IG_POSTS).call(run_input=run_input)
+            items = client.dataset(run["defaultDatasetId"]).list_items().items
+
+            # Group posts by username
+            posts_by_user = {}
+            for item in items:
+                owner = (item.get("ownerUsername") or "").lower()
+                likes = item.get("likesCount", -1)
+                if owner and likes >= 0:  # Exclude hidden likes (-1)
+                    posts_by_user.setdefault(owner, []).append(likes)
+
+            for user, likes_list in posts_by_user.items():
+                if likes_list:
+                    all_likes[user] = sum(likes_list) / len(likes_list)
+
+            print(f"  Got Posts data for {len(all_likes)} profiles so far")
+        except Exception as e:
+            print(f"  [ERROR] Instagram Posts batch failed: {e}")
+
+        if i + batch_size < len(usernames):
+            time.sleep(3)
+
+    # Overwrite avg_likes with actual computed average where available
+    existing = df["avg_likes"] if "avg_likes" in df.columns else 0
+    df["avg_likes"] = df["ig_username"].apply(
+        lambda u: all_likes.get(u.lower(), 0) if u else 0
+    )
+    # Keep existing values for profiles where the scraper didn't return data
+    if isinstance(existing, pd.Series):
+        no_new_data = (df["avg_likes"] == 0) & (existing > 0)
+        df.loc[no_new_data, "avg_likes"] = existing[no_new_data]
+
+    has_likes = (df["avg_likes"] > 0).sum()
+    print(f"\n  Profiles with Post like data: {has_likes}")
+
+    return df
+
+
+# ─── Booking Availability (OpenTable / Resy) ─────────────────────────
+
+def enrich_booking_availability(df: pd.DataFrame) -> pd.DataFrame:
+    """Check actual booking availability for restaurants with reservation platforms."""
+    print(f"\n{'='*60}")
+    print(f"PHASE 2h: CHECKING BOOKING AVAILABILITY")
+    print(f"{'='*60}")
+
+    # Only check restaurants that have a reservation platform detected
+    mask = df["reservation_difficulty"].fillna(0).astype(int) >= 1
+    candidates = df.loc[mask]
+
+    if candidates.empty:
+        print("  No restaurants with reservation platforms — skipping")
+        df["booking_availability_score"] = 1.0
+        return df
+
+    print(f"  Found {len(candidates)} restaurants with reservation platforms")
+
+    from datetime import timedelta
+    today = datetime.now().date()
+    check_dates = [
+        (today + timedelta(days=1)).isoformat(),
+        (today + timedelta(days=3)).isoformat(),
+        (today + timedelta(days=7)).isoformat(),
+    ]
+
+    client = ApifyClient(APIFY_API_TOKEN)
+    availability_scores = {}
+
+    # --- OpenTable (reservation_difficulty == 1) ---
+    ot_mask = candidates["reservation_difficulty"].astype(int) == 1
+    ot_rows = candidates.loc[ot_mask]
+
+    if not ot_rows.empty:
+        print(f"\n  Checking OpenTable availability for {len(ot_rows)} restaurants...")
+
+        ot_urls = []
+        ot_indices = []
+        for idx, row in ot_rows.iterrows():
+            url = row.get("reservation_url", "")
+            if url and "opentable.com" in url.lower():
+                ot_urls.append(url)
+                ot_indices.append(idx)
+
+        if ot_urls:
+            batch_size = 20
+            for i in range(0, len(ot_urls), batch_size):
+                batch_urls = ot_urls[i:i + batch_size]
+                batch_indices = ot_indices[i:i + batch_size]
+
+                run_input = {
+                    "startUrls": [{"url": u} for u in batch_urls],
+                    "dates": check_dates,
+                    "partySize": 2,
+                    "time": "19:00",
+                }
+
+                try:
+                    run = client.actor(APIFY_ACTOR_OPENTABLE).call(run_input=run_input)
+                    items = client.dataset(run["defaultDatasetId"]).list_items().items
+
+                    for item in items:
+                        source_url = item.get("url", "")
+                        slots = item.get("availableSlots") or item.get("timeslots") or []
+                        slot_count = len(slots) if isinstance(slots, list) else 0
+
+                        # Match back to index by URL
+                        for j, url in enumerate(batch_urls):
+                            if source_url and url.rstrip("/") in source_url:
+                                idx = batch_indices[j]
+                                availability_scores.setdefault(idx, []).append(slot_count)
+                                break
+
+                except Exception as e:
+                    print(f"  [ERROR] OpenTable scrape failed: {e}")
+
+                if i + batch_size < len(ot_urls):
+                    time.sleep(3)
+
+    # --- Resy (reservation_difficulty == 2) ---
+    resy_mask = candidates["reservation_difficulty"].astype(int) == 2
+    resy_rows = candidates.loc[resy_mask]
+
+    if not resy_rows.empty and RESY_API_KEY:
+        print(f"\n  Checking Resy availability for {len(resy_rows)} restaurants...")
+
+        for idx, row in resy_rows.iterrows():
+            resy_url = row.get("reservation_url", "")
+            if not resy_url or "resy.com" not in resy_url.lower():
+                continue
+
+            # Extract venue slug from URL
+            slug_match = re.search(r"resy\.com/cities/[^/]+/([^/?]+)", resy_url)
+            if not slug_match:
+                continue
+            venue_slug = slug_match.group(1)
+
+            total_slots = 0
+            for date in check_dates:
+                try:
+                    resp = requests.get(
+                        f"{RESY_API_BASE}/find",
+                        params={
+                            "lat": 0, "long": 0,
+                            "day": date,
+                            "party_size": 2,
+                            "venue_id": venue_slug,
+                        },
+                        headers={
+                            "Authorization": f'ResyAPI api_key="{RESY_API_KEY}"',
+                            "X-Resy-Auth-Token": RESY_API_KEY,
+                        },
+                        timeout=10,
+                    )
+                    if resp.ok:
+                        data = resp.json()
+                        slots = data.get("results", {}).get("venues", [])
+                        for venue in slots:
+                            slot_list = venue.get("slots", [])
+                            total_slots += len(slot_list)
+                except Exception:
+                    pass
+
+            availability_scores[idx] = [total_slots / len(check_dates)] if total_slots else [0]
+    elif not resy_rows.empty and not RESY_API_KEY:
+        print(f"  Skipping Resy checks — RESY_API_KEY not set")
+
+    # Tock (reservation_difficulty == 3) — no API, skip availability check
+
+    # Compute normalized score: 0.0 = fully booked, 1.0 = wide open
+    # Normalize based on max ~10 slots per date as "wide open"
+    max_slots_per_date = 10.0
+
+    def compute_availability(idx):
+        if idx not in availability_scores:
+            return 1.0  # Default for unchecked
+        slots = availability_scores[idx]
+        avg_slots = sum(slots) / len(slots) if slots else 0
+        return round(min(1.0, avg_slots / max_slots_per_date), 3)
+
+    df["booking_availability_score"] = df.index.map(
+        lambda i: compute_availability(i) if i in availability_scores else 1.0
+    )
+
+    checked = len(availability_scores)
+    fully_booked = sum(1 for v in availability_scores.values() if sum(v) == 0)
+    print(f"\n  Checked availability: {checked}")
+    print(f"  Fully booked (score=0): {fully_booked}")
 
     return df
 

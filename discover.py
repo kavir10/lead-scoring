@@ -146,7 +146,7 @@ def discover_leads() -> pd.DataFrame:
 
     # --- Parse town / state from address ---
     parsed = df["address"].apply(parse_town_state)
-    df["town"] = parsed.apply(lambda x: x[0])
+    df["city"] = parsed.apply(lambda x: x[0])
     df["state"] = parsed.apply(lambda x: x[1])
 
     # --- Dedup ---
@@ -183,8 +183,9 @@ def discover_leads() -> pd.DataFrame:
     # --- Must have a website (needed for enrichment) ---
     df_final = df_final[df_final["website"].str.len() > 0]
 
-    # --- Must have at least some reviews ---
-    df_final = df_final[df_final["review_count"] >= 10]
+    # --- Quality floor: 50+ reviews and 4.2+ rating ---
+    df_final = df_final[df_final["review_count"] >= 50]
+    df_final = df_final[df_final["rating"] >= 4.2]
 
     # --- Convert price_level to numeric tier ---
     def parse_price(p):
@@ -212,4 +213,4 @@ if __name__ == "__main__":
     df = discover_leads()
     if not df.empty:
         print(f"\nTop 20 by review count:")
-        print(df[["name", "town", "state", "business_type", "rating", "review_count", "website"]].head(20).to_string())
+        print(df[["name", "city", "state", "business_type", "rating", "review_count", "website"]].head(20).to_string())

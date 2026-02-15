@@ -16,7 +16,11 @@ from datetime import datetime
 import pandas as pd
 
 from discover import discover_leads
-from enrich import enrich_websites, enrich_instagram, enrich_facebook, enrich_press_and_awards
+from enrich import (
+    enrich_websites, enrich_instagram, enrich_facebook, enrich_press_and_awards,
+    enrich_google_reviews, enrich_instagram_reels, enrich_instagram_posts,
+    enrich_booking_availability,
+)
 from score import score_leads
 
 
@@ -70,6 +74,30 @@ def run_enrichment(df: pd.DataFrame) -> pd.DataFrame:
     df.to_csv(path, index=False)
     print(f"\nSaved full enrichment to {path}")
 
+    df = enrich_google_reviews(df)
+
+    path = os.path.join(OUTPUT_DIR, "2_enriched_reviews.csv")
+    df.to_csv(path, index=False)
+    print(f"\nSaved Google Reviews enrichment to {path}")
+
+    df = enrich_instagram_reels(df)
+
+    path = os.path.join(OUTPUT_DIR, "2_enriched_reels.csv")
+    df.to_csv(path, index=False)
+    print(f"\nSaved Instagram Reels enrichment to {path}")
+
+    df = enrich_instagram_posts(df)
+
+    path = os.path.join(OUTPUT_DIR, "2_enriched_posts.csv")
+    df.to_csv(path, index=False)
+    print(f"\nSaved Instagram Posts enrichment to {path}")
+
+    df = enrich_booking_availability(df)
+
+    path = os.path.join(OUTPUT_DIR, "2_enriched_availability.csv")
+    df.to_csv(path, index=False)
+    print(f"\nSaved booking availability enrichment to {path}")
+
     return df
 
 
@@ -90,11 +118,14 @@ def run_scoring(df: pd.DataFrame) -> pd.DataFrame:
 
     # Clean output columns for the final list
     output_cols = [
-        "name", "address", "phone", "website", "business_type",
+        "name", "address", "city", "state", "phone", "website", "business_type",
         "lead_score", "tier",
-        "reservation_difficulty", "follower_count", "avg_video_views",
+        "reservation_difficulty", "reservation_url",
+        "review_difficulty_sentiment", "booking_availability_score",
+        "follower_count", "avg_video_views",
+        "review_count",
         "press_mentions", "press_sources", "awards_count", "awards_list",
-        "domain_age", "rating", "avg_likes", "price_tier",
+        "rating", "avg_likes", "price_tier",
         "instagram_url", "ig_followers",
         "facebook_url", "fb_likes",
         "has_email_signup", "has_ecommerce",
