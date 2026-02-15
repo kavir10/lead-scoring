@@ -31,9 +31,9 @@ def ensure_output_dir():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 
-def run_discovery(types: list[str] | None = None) -> pd.DataFrame:
+def run_discovery(types: list[str] | None = None, max_searches: int = 0) -> pd.DataFrame:
     """Phase 1: Find leads."""
-    df = discover_leads(types=types)
+    df = discover_leads(types=types, max_searches=max_searches)
 
     if df.empty:
         print("\nNo leads found. Check API key and try again.")
@@ -171,6 +171,7 @@ def main():
     parser = argparse.ArgumentParser(description="Lead Scorer")
     parser.add_argument("--discover", action="store_true", help="Only run discovery")
     parser.add_argument("--types", type=str, help="Comma-separated business types to discover (e.g. butcher,wine_store)")
+    parser.add_argument("--max-searches", type=int, default=0, help="Max Serper API calls (0 = unlimited)")
     parser.add_argument("--merge", type=str, help="Merge new discovery with existing CSV (path to existing)")
     parser.add_argument("--enrich", type=str, help="Enrich from existing CSV path")
     parser.add_argument("--score", type=str, help="Score from existing CSV path")
@@ -200,7 +201,7 @@ def main():
         return
 
     if args.discover:
-        df = run_discovery(types=types_filter)
+        df = run_discovery(types=types_filter, max_searches=args.max_searches)
         if args.merge and not df.empty:
             df = merge_discovery(args.merge, df)
             path = os.path.join(OUTPUT_DIR, "1_discovered_merged.csv")
@@ -209,7 +210,7 @@ def main():
         return
 
     # Full pipeline
-    df = run_discovery(types=types_filter)
+    df = run_discovery(types=types_filter, max_searches=args.max_searches)
     if args.merge and not df.empty:
         df = merge_discovery(args.merge, df)
     df = run_enrichment(df)

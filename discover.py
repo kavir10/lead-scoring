@@ -11,8 +11,8 @@ from config import (
 )
 
 
-def search_serper_maps(query: str, location: str) -> list[dict]:
-    """Search Serper Maps API for a query + location combo."""
+def search_serper_maps(query: str, location: str, max_retries: int = 3) -> list[dict]:
+    """Search Serper Maps API for a query + location combo with retry on rate limits."""
     url = "https://google.serper.dev/maps"
     headers = {
         "X-API-KEY": SERPER_API_KEY,
@@ -26,34 +26,42 @@ def search_serper_maps(query: str, location: str) -> list[dict]:
         "num": 20,
     }
 
-    try:
-        resp = requests.post(url, json=payload, headers=headers, timeout=15)
-        resp.raise_for_status()
-        data = resp.json()
-        places = data.get("places", [])
+    for attempt in range(max_retries):
+        try:
+            resp = requests.post(url, json=payload, headers=headers, timeout=15)
+            resp.raise_for_status()
+            data = resp.json()
+            places = data.get("places", [])
 
-        results = []
-        for p in places:
-            results.append({
-                "name": p.get("title", ""),
-                "address": p.get("address", ""),
-                "rating": p.get("rating"),
-                "review_count": p.get("ratingCount", 0),
-                "category": p.get("category", ""),
-                "phone": p.get("phoneNumber", ""),
-                "website": p.get("website", ""),
-                "price_level": p.get("priceLevel", ""),
-                "latitude": p.get("latitude"),
-                "longitude": p.get("longitude"),
-                "cid": p.get("cid", ""),
-                "search_query": query,
-                "search_city": location,
-            })
-        return results
+            results = []
+            for p in places:
+                results.append({
+                    "name": p.get("title", ""),
+                    "address": p.get("address", ""),
+                    "rating": p.get("rating"),
+                    "review_count": p.get("ratingCount", 0),
+                    "category": p.get("category", ""),
+                    "phone": p.get("phoneNumber", ""),
+                    "website": p.get("website", ""),
+                    "price_level": p.get("priceLevel", ""),
+                    "latitude": p.get("latitude"),
+                    "longitude": p.get("longitude"),
+                    "cid": p.get("cid", ""),
+                    "search_query": query,
+                    "search_city": location,
+                })
+            return results
 
-    except requests.RequestException as e:
-        print(f"  [ERROR] Serper request failed for '{query}' in {location}: {e}")
-        return []
+        except requests.RequestException as e:
+            status = getattr(e.response, 'status_code', None) if hasattr(e, 'response') else None
+            if status in (400, 429) and attempt < max_retries - 1:
+                wait = 2 ** (attempt + 1)  # 2s, 4s, 8s
+                print(f"rate limited, waiting {wait}s...", end=" ", flush=True)
+                time.sleep(wait)
+                continue
+            print(f"  [ERROR] Serper request failed for '{query}' in {location}: {e}")
+            return []
+    return []
 
 
 def parse_town_state(address: str) -> tuple[str, str]:
@@ -102,12 +110,13 @@ def is_liquor_store(name: str, category: str) -> bool:
     return any(kw in combined for kw in LIQUOR_KEYWORDS)
 
 
-def discover_leads(types: list[str] | None = None) -> pd.DataFrame:
+def discover_leads(types: list[str] | None = None, max_searches: int = 0) -> pd.DataFrame:
     """Run all search queries across all cities and deduplicate.
 
     Args:
         types: Optional list of business types to discover (e.g. ["butcher", "wine_store"]).
                When set, only search categories mapping to these types are run.
+        max_searches: Stop after this many API calls (0 = unlimited).
     """
     all_results = []
 
@@ -124,23 +133,35 @@ def discover_leads(types: list[str] | None = None) -> pd.DataFrame:
 
     # Count total searches for progress display
     total_searches = sum(len(queries) for queries in active_queries.values()) * len(CITIES)
+    if max_searches > 0:
+        total_searches = min(total_searches, max_searches)
     search_num = 0
+    hit_limit = False
 
     type_label = ", ".join(types) if types else "all"
     print(f"\n{'='*60}")
     print(f"PHASE 1: DISCOVERING LEADS ({type_label})")
     print(f"{'='*60}")
     print(f"Search categories: {', '.join(active_queries.keys())}")
-    print(f"Running {total_searches} searches across {len(CITIES)} cities")
+    limit_note = f" (capped at {max_searches})" if max_searches > 0 else ""
+    print(f"Running up to {total_searches} searches across {len(CITIES)} cities{limit_note}")
     print()
 
     for category, queries in active_queries.items():
+        if hit_limit:
+            break
         business_type = BUSINESS_TYPE_MAP[category]
         print(f"\n--- {category.upper()} (tagged as '{business_type}') ---")
 
         for query in queries:
+            if hit_limit:
+                break
             for city in CITIES:
                 search_num += 1
+                if max_searches > 0 and search_num > max_searches:
+                    print(f"\n  Reached max searches limit ({max_searches}). Stopping discovery.")
+                    hit_limit = True
+                    break
                 print(f"  [{search_num}/{total_searches}] \"{query}\" in {city}...", end=" ")
                 results = search_serper_maps(query, city)
                 print(f"found {len(results)}")
@@ -151,7 +172,7 @@ def discover_leads(types: list[str] | None = None) -> pd.DataFrame:
                     r["search_category"] = category
 
                 all_results.extend(results)
-                time.sleep(0.3)  # Rate limit
+                time.sleep(0.5)  # Rate limit
 
     print(f"\nTotal raw results: {len(all_results)}")
 
