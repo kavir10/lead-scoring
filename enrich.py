@@ -424,13 +424,29 @@ def search_press_mentions(business_name: str, city: str) -> dict:
     return result
 
 
-def search_awards(business_name: str, city: str) -> dict:
-    """Search for James Beard, Michelin, and other food awards."""
+def search_awards(business_name: str, city: str, business_type: str = "") -> dict:
+    """Search for James Beard, Michelin, and other food/wine/butcher awards."""
     from config import SERPER_API_KEY
 
     result = {"awards_count": 0, "awards_list": ""}
 
+    # Base award keywords for all types
     award_keywords = ["James Beard", "Michelin", "best new restaurant", "Food & Wine best"]
+
+    # Add wine-specific award keywords
+    if business_type == "wine_store":
+        award_keywords.extend([
+            "Wine Spectator", "Wine Enthusiast", "best wine shop",
+            "wine store of the year", "top wine shop",
+        ])
+
+    # Add butcher-specific award keywords
+    if business_type == "butcher":
+        award_keywords.extend([
+            "best butcher", "craft butcher award", "best meat shop",
+            "top butcher shop", "butcher of the year",
+        ])
+
     query = f'"{business_name}" {city} ({" OR ".join(award_keywords)})'
 
     try:
@@ -453,6 +469,18 @@ def search_awards(business_name: str, city: str) -> dict:
                 awards_found.add("Michelin")
             if "best new restaurant" in title:
                 awards_found.add("Best New Restaurant")
+            # Wine-specific awards
+            if "wine spectator" in title:
+                awards_found.add("Wine Spectator")
+            if "wine enthusiast" in title:
+                awards_found.add("Wine Enthusiast")
+            if "best wine" in title:
+                awards_found.add("Best Wine Shop")
+            # Butcher-specific awards
+            if "best butcher" in title:
+                awards_found.add("Best Butcher")
+            if "best meat" in title:
+                awards_found.add("Best Meat Shop")
 
         result["awards_count"] = len(awards_found)
         result["awards_list"] = ", ".join(sorted(awards_found))
@@ -475,8 +503,8 @@ def enrich_press_and_awards(df: pd.DataFrame) -> pd.DataFrame:
     def process_press(idx, name, city):
         return idx, search_press_mentions(name, city)
 
-    def process_awards(idx, name, city):
-        return idx, search_awards(name, city)
+    def process_awards(idx, name, city, btype):
+        return idx, search_awards(name, city, btype)
 
     with ThreadPoolExecutor(max_workers=5) as executor:
         futures = {
@@ -494,7 +522,7 @@ def enrich_press_and_awards(df: pd.DataFrame) -> pd.DataFrame:
         time.sleep(1)
 
         futures = {
-            executor.submit(process_awards, idx, row["name"], row.get("search_city", "")): idx
+            executor.submit(process_awards, idx, row["name"], row.get("search_city", ""), row.get("business_type", "")): idx
             for idx, row in df.iterrows()
         }
         done = 0

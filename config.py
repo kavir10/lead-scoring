@@ -46,27 +46,61 @@ SEARCH_QUERIES = {
         "best steakhouse",
         "best pizza restaurant",
     ],
-    "butcher": [
+    "butcher_premium": [
+        "best butcher shop",
         "artisan butcher shop",
         "craft butcher",
         "whole animal butcher",
+        "dry aged beef butcher",
+        "heritage breed butcher",
+        "wagyu butcher",
+        "prime meat shop",
+        "gourmet butcher shop",
+        "nose to tail butcher",
+        "sustainable butcher shop",
+        "organic butcher shop",
+    ],
+    "butcher_local": [
         "specialty butcher shop",
         "independent butcher shop",
         "local butcher shop",
-        "dry aged beef butcher",
-        "heritage breed butcher",
+        "neighborhood butcher",
+        "favorite butcher shop",
+        "family butcher shop",
+        "top rated butcher",
+        "custom cut butcher",
+        "meat market",
+        "charcuterie shop",
+        "smoked meat shop",
+        "old fashioned butcher",
     ],
-    "wine_store": [
+    "wine_store_premium": [
         "wine shop",
         "natural wine shop",
         "wine boutique",
         "fine wine store",
+        "curated wine shop",
+        "sommelier wine shop",
+        "rare wine shop",
+        "organic wine store",
+        "biodynamic wine shop",
+        "wine cellar store",
+        "premium wine store",
+        "artisan wine shop",
+    ],
+    "wine_store_local": [
         "wine club membership",
         "favorite wine store",
         "independent wine shop",
-        "curated wine shop",
         "top rated wine store",
-        "sommelier wine shop",
+        "neighborhood wine shop",
+        "local wine store",
+        "wine and cheese shop",
+        "best wine store",
+        "wine bar and shop",
+        "wine tasting shop",
+        "hidden gem wine store",
+        "boutique wine shop",
     ],
 }
 
@@ -74,8 +108,10 @@ SEARCH_QUERIES = {
 BUSINESS_TYPE_MAP = {
     "restaurant_destination": "restaurant",
     "restaurant_neighborhood": "restaurant",
-    "butcher": "butcher",
-    "wine_store": "wine_store",
+    "butcher_premium": "butcher",
+    "butcher_local": "butcher",
+    "wine_store_premium": "wine_store",
+    "wine_store_local": "wine_store",
 }
 
 # Top US metros + foodie cities
@@ -130,6 +166,32 @@ CITIES = [
     "Providence, Rhode Island",
     "Burlington, Vermont",
     "Santa Fe, New Mexico",
+    # Additional foodie cities for broader butcher/wine coverage
+    "Napa, California",
+    "Sonoma, California",
+    "Portland, Maine",
+    "Cambridge, Massachusetts",
+    "Pasadena, California",
+    "Santa Monica, California",
+    "Berkeley, California",
+    "Hoboken, New Jersey",
+    "Jersey City, New Jersey",
+    "Alexandria, Virginia",
+    "Scottsdale, Arizona",
+    "Fort Worth, Texas",
+    "Greenville, South Carolina",
+    "Durham, North Carolina",
+    "Ann Arbor, Michigan",
+    "Chattanooga, Tennessee",
+    "Knoxville, Tennessee",
+    "Omaha, Nebraska",
+    "Des Moines, Iowa",
+    "Honolulu, Hawaii",
+    "Bend, Oregon",
+    "Albuquerque, New Mexico",
+    "Wilmington, North Carolina",
+    "Lexington, Kentucky",
+    "Grand Rapids, Michigan",
 ]
 
 # Keywords for Google Review reservation sentiment analysis
@@ -171,6 +233,11 @@ CHAIN_KEYWORDS = [
     "outback", "cheesecake factory", "p.f. chang", "ruth's chris",
     "capital grille", "morton's", "total wine", "binny's",
     "bevmo", "spec's",
+    # Butcher/meat chains
+    "omaha steaks", "honey baked ham", "the honey baked",
+    "arby's", "boston market",
+    # Wine chains
+    "wine.com", "vivino", "drizly",
 ]
 
 # Liquor-store keywords to filter out of wine_store results
@@ -183,6 +250,12 @@ LIQUOR_KEYWORDS = [
 PRESS_DOMAINS = [
     "eater.com", "bonappetit.com", "nytimes.com",
     "foodandwine.com", "saveur.com", "theinfatuation.com",
+    "tastingtable.com", "seriouseats.com",
+    # Wine-specific press
+    "wineenthusiast.com", "winemag.com", "vinepair.com",
+    "wine-searcher.com", "decanter.com",
+    # Meat/butcher-specific press
+    "meatpoultry.com", "meatingplace.com",
 ]
 
 # Reservation platform priority (higher = harder to get into)

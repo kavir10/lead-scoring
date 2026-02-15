@@ -183,9 +183,13 @@ def discover_leads() -> pd.DataFrame:
     # --- Must have a website (needed for enrichment) ---
     df_final = df_final[df_final["website"].str.len() > 0]
 
-    # --- Quality floor: 50+ reviews and 4.2+ rating ---
-    df_final = df_final[df_final["review_count"] >= 50]
-    df_final = df_final[df_final["rating"] >= 4.2]
+    # --- Quality floor: reviews and rating thresholds ---
+    # Restaurants: 50+ reviews, 4.2+ rating (high volume, stricter floor)
+    # Butcher/Wine: 20+ reviews, 4.0+ rating (niche businesses, fewer reviews)
+    is_restaurant = df_final["business_type"] == "restaurant"
+    restaurant_mask = is_restaurant & (df_final["review_count"] >= 50) & (df_final["rating"] >= 4.2)
+    niche_mask = ~is_restaurant & (df_final["review_count"] >= 20) & (df_final["rating"] >= 4.0)
+    df_final = df_final[restaurant_mask | niche_mask]
 
     # --- Convert price_level to numeric tier ---
     def parse_price(p):
@@ -199,7 +203,7 @@ def discover_leads() -> pd.DataFrame:
 
     print(f"\nAfter deduplication: {len(df_final)} unique leads (removed {before - len(df_final)} dupes)")
     print(f"  Filtered out {n_chains} chains, {n_liquor} liquor stores")
-    print(f"  Required: website + 10 reviews minimum")
+    print(f"  Required: website + reviews floor (50 restaurant / 20 butcher & wine)")
 
     # Breakdown by type
     for bt in df_final["business_type"].unique():
