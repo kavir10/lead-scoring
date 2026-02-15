@@ -102,22 +102,39 @@ def is_liquor_store(name: str, category: str) -> bool:
     return any(kw in combined for kw in LIQUOR_KEYWORDS)
 
 
-def discover_leads() -> pd.DataFrame:
-    """Run all search queries across all cities and deduplicate."""
+def discover_leads(types: list[str] | None = None) -> pd.DataFrame:
+    """Run all search queries across all cities and deduplicate.
+
+    Args:
+        types: Optional list of business types to discover (e.g. ["butcher", "wine_store"]).
+               When set, only search categories mapping to these types are run.
+    """
     all_results = []
 
+    # Filter search queries by requested types
+    active_queries = SEARCH_QUERIES
+    if types:
+        active_queries = {
+            cat: queries for cat, queries in SEARCH_QUERIES.items()
+            if BUSINESS_TYPE_MAP[cat] in types
+        }
+        if not active_queries:
+            print(f"No search categories match types: {types}")
+            return pd.DataFrame()
+
     # Count total searches for progress display
-    total_searches = sum(len(queries) for queries in SEARCH_QUERIES.values()) * len(CITIES)
+    total_searches = sum(len(queries) for queries in active_queries.values()) * len(CITIES)
     search_num = 0
 
+    type_label = ", ".join(types) if types else "all"
     print(f"\n{'='*60}")
-    print(f"PHASE 1: DISCOVERING LEADS")
+    print(f"PHASE 1: DISCOVERING LEADS ({type_label})")
     print(f"{'='*60}")
-    print(f"Business types: {', '.join(SEARCH_QUERIES.keys())}")
+    print(f"Search categories: {', '.join(active_queries.keys())}")
     print(f"Running {total_searches} searches across {len(CITIES)} cities")
     print()
 
-    for category, queries in SEARCH_QUERIES.items():
+    for category, queries in active_queries.items():
         business_type = BUSINESS_TYPE_MAP[category]
         print(f"\n--- {category.upper()} (tagged as '{business_type}') ---")
 

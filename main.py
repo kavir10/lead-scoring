@@ -31,9 +31,9 @@ def ensure_output_dir():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 
-def run_discovery() -> pd.DataFrame:
+def run_discovery(types: list[str] | None = None) -> pd.DataFrame:
     """Phase 1: Find leads."""
-    df = discover_leads()
+    df = discover_leads(types=types)
 
     if df.empty:
         print("\nNo leads found. Check API key and try again.")
@@ -139,17 +139,51 @@ def run_scoring(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def merge_discovery(existing_path: str, new_df: pd.DataFrame) -> pd.DataFrame:
+    """Merge new discovery results with an existing discovery CSV, deduplicating."""
+    existing = pd.read_csv(existing_path)
+    print(f"\nMerging {len(new_df)} new leads with {len(existing)} existing leads...")
+
+    combined = pd.concat([existing, new_df], ignore_index=True)
+
+    # Dedup by phone
+    combined["phone_clean"] = combined["phone"].astype(str).str.replace(r"[^\d]", "", regex=True)
+    df_deduped = combined.drop_duplicates(subset=["phone_clean"], keep="first")
+    mask_no_phone = df_deduped["phone_clean"] == ""
+    df_with_phone = df_deduped[~mask_no_phone]
+    df_no_phone = df_deduped[mask_no_phone].drop_duplicates(
+        subset=["name", "address"], keep="first"
+    )
+    merged = pd.concat([df_with_phone, df_no_phone], ignore_index=True)
+    merged = merged.drop(columns=["phone_clean"])
+
+    dupes_removed = len(combined) - len(merged)
+    print(f"  Combined: {len(merged)} unique leads ({dupes_removed} duplicates removed)")
+
+    for bt in merged["business_type"].unique():
+        n = (merged["business_type"] == bt).sum()
+        print(f"  {bt}: {n}")
+
+    return merged
+
+
 def main():
     parser = argparse.ArgumentParser(description="Lead Scorer")
     parser.add_argument("--discover", action="store_true", help="Only run discovery")
+    parser.add_argument("--types", type=str, help="Comma-separated business types to discover (e.g. butcher,wine_store)")
+    parser.add_argument("--merge", type=str, help="Merge new discovery with existing CSV (path to existing)")
     parser.add_argument("--enrich", type=str, help="Enrich from existing CSV path")
     parser.add_argument("--score", type=str, help="Score from existing CSV path")
     args = parser.parse_args()
+
+    types_filter = [t.strip() for t in args.types.split(",")] if args.types else None
 
     print(f"\n{'#'*60}")
     print(f"  LEAD SCORING PIPELINE")
     print(f"  Finding subscription-ready independent food businesses")
     print(f"  {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    if types_filter:
+        print(f"  Types filter: {', '.join(types_filter)}")
     print(f"{'#'*60}")
 
     if args.score:
@@ -166,11 +200,18 @@ def main():
         return
 
     if args.discover:
-        run_discovery()
+        df = run_discovery(types=types_filter)
+        if args.merge and not df.empty:
+            df = merge_discovery(args.merge, df)
+            path = os.path.join(OUTPUT_DIR, "1_discovered_merged.csv")
+            df.to_csv(path, index=False)
+            print(f"\nSaved merged discovery to {path}")
         return
 
     # Full pipeline
-    df = run_discovery()
+    df = run_discovery(types=types_filter)
+    if args.merge and not df.empty:
+        df = merge_discovery(args.merge, df)
     df = run_enrichment(df)
     df = run_scoring(df)
 
