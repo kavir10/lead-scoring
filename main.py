@@ -174,6 +174,7 @@ def main():
     parser.add_argument("--max-searches", type=int, default=0, help="Max Serper API calls (0 = unlimited)")
     parser.add_argument("--merge", type=str, help="Merge new discovery with existing CSV (path to existing)")
     parser.add_argument("--enrich", type=str, help="Enrich from existing CSV path")
+    parser.add_argument("--enrich-remaining", type=str, help="Run only remaining enrichment phases (reels, posts, availability) + scoring")
     parser.add_argument("--score", type=str, help="Score from existing CSV path")
     args = parser.parse_args()
 
@@ -190,6 +191,29 @@ def main():
     if args.score:
         # Just score existing enriched data
         df = pd.read_csv(args.score)
+        run_scoring(df)
+        return
+
+    if args.enrich_remaining:
+        # Run only the remaining enrichment phases (reels, posts, availability) + scoring
+        df = pd.read_csv(args.enrich_remaining)
+        ensure_output_dir()
+
+        df = enrich_instagram_reels(df)
+        path = os.path.join(OUTPUT_DIR, "2_enriched_reels.csv")
+        df.to_csv(path, index=False)
+        print(f"\nSaved Instagram Reels enrichment to {path}")
+
+        df = enrich_instagram_posts(df)
+        path = os.path.join(OUTPUT_DIR, "2_enriched_posts.csv")
+        df.to_csv(path, index=False)
+        print(f"\nSaved Instagram Posts enrichment to {path}")
+
+        df = enrich_booking_availability(df)
+        path = os.path.join(OUTPUT_DIR, "2_enriched_availability.csv")
+        df.to_csv(path, index=False)
+        print(f"\nSaved booking availability enrichment to {path}")
+
         run_scoring(df)
         return
 

@@ -664,7 +664,7 @@ def enrich_instagram_reels(df: pd.DataFrame) -> pd.DataFrame:
     print(f"PHASE 2f: SCRAPING INSTAGRAM REELS")
     print(f"{'='*60}")
 
-    mask = df["ig_username"].astype(str).str.strip().ne("")
+    mask = df["ig_username"].fillna("").astype(str).str.strip().pipe(lambda s: (s != "") & (s != "nan"))
     usernames = df.loc[mask, "ig_username"].tolist()
 
     if not usernames:
@@ -735,7 +735,7 @@ def enrich_instagram_posts(df: pd.DataFrame) -> pd.DataFrame:
     print(f"PHASE 2g: SCRAPING INSTAGRAM POSTS")
     print(f"{'='*60}")
 
-    mask = df["ig_username"].astype(str).str.strip().ne("")
+    mask = df["ig_username"].fillna("").astype(str).str.strip().pipe(lambda s: (s != "") & (s != "nan"))
     usernames = df.loc[mask, "ig_username"].tolist()
 
     if not usernames:
