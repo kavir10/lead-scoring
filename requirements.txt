@@ -4,3 +4,4 @@ pandas
 python-dotenv
 apify-client
 python-whois
+playwright
