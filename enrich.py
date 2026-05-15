@@ -41,6 +41,83 @@ ONLINE_ORDER_SIGNALS = [
     "toast", "square online", "chownow",
 ]
 
+BUTCHER_MEAT_BOX_SIGNALS = [
+    "meat box", "butcher box", "monthly box", "box subscription",
+    "curated box", "beef box", "pork box", "mixed meat box",
+]
+
+BUTCHER_CSA_SIGNALS = [
+    "csa", "meat csa", "meat share", "farm share", "beef share",
+    "quarter cow", "half cow", "whole cow", "half hog", "whole hog",
+]
+
+BUTCHER_PREORDER_SIGNALS = [
+    "preorder", "pre-order", "pre order", "holiday order",
+    "thanksgiving order", "christmas order", "reserve your",
+]
+
+BUTCHER_SHIPPING_SIGNALS = [
+    "ships nationwide", "ship nationwide", "we ship", "shipping available",
+    "local delivery", "delivery available", "frozen shipping",
+]
+
+BUTCHER_PICKUP_SIGNALS = [
+    "pickup", "pick up", "in-store pickup", "store pickup",
+    "curbside", "pickup window",
+]
+
+BUTCHER_SUBSCRIPTION_SIGNALS = [
+    "subscription", "subscribe", "recurring", "monthly membership",
+    "meat club", "butcher club", "membership", "monthly share",
+]
+
+BUTCHER_ANIMAL_WELFARE_SIGNALS = [
+    "pasture raised", "pasture-raised", "grass fed", "grass-fed",
+    "regenerative", "heritage breed", "local farm", "sustainable",
+    "humanely raised", "animal welfare", "antibiotic free",
+]
+
+BUTCHER_WHOLE_ANIMAL_SIGNALS = [
+    "whole animal", "whole-animal", "nose to tail", "nose-to-tail",
+    "custom cut", "custom-cut", "cut to order",
+]
+
+BUTCHER_DRY_AGED_SIGNALS = [
+    "dry aged", "dry-aged", "dry aging", "dry-aging",
+]
+
+
+def _has_signal(html: str, signals: list[str]) -> bool:
+    return any(signal in html for signal in signals)
+
+
+def analyze_butcher_signals(html: str) -> dict:
+    """Extract butcher-specific subscription/readiness signals from HTML text."""
+    text = (html or "").lower()
+    return {
+        "has_meat_box": _has_signal(text, BUTCHER_MEAT_BOX_SIGNALS),
+        "has_csa_or_share": _has_signal(text, BUTCHER_CSA_SIGNALS),
+        "has_preorder": _has_signal(text, BUTCHER_PREORDER_SIGNALS),
+        "ships_meat": _has_signal(text, BUTCHER_SHIPPING_SIGNALS),
+        "has_pickup": _has_signal(text, BUTCHER_PICKUP_SIGNALS),
+        "has_subscription_language": _has_signal(text, BUTCHER_SUBSCRIPTION_SIGNALS),
+        "animal_welfare_signal": _has_signal(text, BUTCHER_ANIMAL_WELFARE_SIGNALS),
+        "whole_animal_signal": _has_signal(text, BUTCHER_WHOLE_ANIMAL_SIGNALS),
+        "dry_aged_signal": _has_signal(text, BUTCHER_DRY_AGED_SIGNALS),
+    }
+
+
+def _score_source_quality(source: str) -> float:
+    source_scores = {
+        "good_food_awards": 1.0,
+        "good_meat_finder": 0.9,
+        "eatwild": 0.8,
+        "aga": 0.8,
+        "stockist_page": 0.7,
+        "google_maps": 0.2,
+    }
+    return source_scores.get(str(source or "").strip(), 0.0)
+
 
 def analyze_website(url: str) -> dict:
     """Crawl a website and extract signals."""
@@ -57,6 +134,15 @@ def analyze_website(url: str) -> dict:
         "reservation_difficulty": 0,
         "reservation_url": "",
         "domain_age": 0,
+        "has_meat_box": False,
+        "has_csa_or_share": False,
+        "has_preorder": False,
+        "ships_meat": False,
+        "has_pickup": False,
+        "has_subscription_language": False,
+        "animal_welfare_signal": False,
+        "whole_animal_signal": False,
+        "dry_aged_signal": False,
     }
 
     if not url:
@@ -76,6 +162,8 @@ def analyze_website(url: str) -> dict:
 
         html = resp.text.lower()
         soup = BeautifulSoup(resp.text, "html.parser")
+        butcher_signals = analyze_butcher_signals(html)
+        result.update(butcher_signals)
 
         # Page title
         if soup.title:
@@ -132,11 +220,15 @@ def analyze_website(url: str) -> dict:
                         result["reservation_difficulty"] = difficulty
                         result["reservation_url"] = a_tag["href"].strip()
 
-        # Also check a few subpages if we find links to /shop, /order, /products
+        # Also check a few subpages if we find links to shopping/ordering pages
         shop_paths = []
         for a_tag in soup.find_all("a", href=True):
             href = a_tag["href"].lower()
-            if any(kw in href for kw in ["/shop", "/store", "/order", "/products", "/menu"]):
+            if any(kw in href for kw in [
+                "/shop", "/store", "/order", "/products", "/menu",
+                "/box", "/boxes", "/csa", "/share", "/subscription",
+                "/shipping", "/delivery", "/pickup",
+            ]):
                 full_url = urljoin(url, a_tag["href"])
                 if urlparse(full_url).netloc == urlparse(url).netloc:
                     shop_paths.append(full_url)
@@ -154,6 +246,8 @@ def analyze_website(url: str) -> dict:
                     if signal in html2:
                         result["has_online_ordering"] = True
                         break
+                for key, matched in analyze_butcher_signals(html2).items():
+                    result[key] = result[key] or matched
             except Exception:
                 pass
 
@@ -195,20 +289,33 @@ def enrich_websites(df: pd.DataFrame) -> pd.DataFrame:
     for col in ["website_reachable", "has_ecommerce", "has_email_signup",
                 "has_online_ordering", "instagram_url", "facebook_url",
                 "ecommerce_platform", "email_platform", "page_title",
-                "reservation_difficulty", "reservation_url", "domain_age"]:
+                "reservation_difficulty", "reservation_url", "domain_age",
+                "has_meat_box", "has_csa_or_share", "has_preorder",
+                "ships_meat", "has_pickup", "has_subscription_language",
+                "animal_welfare_signal", "whole_animal_signal", "dry_aged_signal"]:
         df[col] = df.index.map(lambda i: results.get(i, {}).get(col, ""))
+
+    source_col = "butcher_source" if "butcher_source" in df.columns else "source"
+    if source_col in df.columns:
+        df["source_quality_score"] = df[source_col].apply(_score_source_quality)
+    else:
+        df["source_quality_score"] = 0.0
 
     reachable = df["website_reachable"].sum()
     ecom = df["has_ecommerce"].sum()
     email = df["has_email_signup"].sum()
     ig = (df["instagram_url"] != "").sum()
     fb = (df["facebook_url"] != "").sum()
+    meat_box = df["has_meat_box"].sum() if "has_meat_box" in df.columns else 0
+    csa = df["has_csa_or_share"].sum() if "has_csa_or_share" in df.columns else 0
 
     print(f"\n  Websites reachable: {reachable}")
     print(f"  Have ecommerce: {ecom}")
     print(f"  Have email signup: {email}")
     print(f"  Instagram found: {ig}")
     print(f"  Facebook found: {fb}")
+    print(f"  Meat box signal: {meat_box}")
+    print(f"  CSA/share signal: {csa}")
 
     return df
 
@@ -357,6 +464,8 @@ def enrich_facebook(df: pd.DataFrame) -> pd.DataFrame:
 
     if not fb_urls:
         df["fb_likes"] = 0
+        ig = df["ig_followers"].fillna(0).astype(int) if "ig_followers" in df.columns else 0
+        df["follower_count"] = ig
         return df
 
     results = {}

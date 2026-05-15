@@ -1,5 +1,8 @@
 .env
-output/
+output/*
+!output/butcher/
+output/butcher/*
+!output/butcher/.gitkeep
 __pycache__/
 *.pyc
 .venv/

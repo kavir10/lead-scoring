@@ -6,6 +6,18 @@ load_dotenv()
 SERPER_API_KEY = os.getenv("SERPER_API_KEY")
 APIFY_API_TOKEN = os.getenv("APIFY_API_TOKEN")
 
+# Butcher national discovery exclusions
+BANNED_STATES = {"HI", "IN", "IA", "KS", "NV", "ND", "SD"}
+BANNED_STATE_NAMES = [
+    "Hawaii",
+    "Indiana",
+    "Iowa",
+    "Kansas",
+    "Nevada",
+    "North Dakota",
+    "South Dakota",
+]
+
 # Apify actor IDs for enrichment phases
 APIFY_ACTOR_GOOGLE_REVIEWS = "compass/google-maps-reviews-scraper"
 APIFY_ACTOR_IG_REELS = "apify/instagram-reel-scraper"
@@ -350,7 +362,7 @@ CHAIN_KEYWORDS = [
     "capital grille", "morton's", "total wine", "binny's",
     "bevmo", "spec's",
     # Butcher/meat chains
-    "omaha steaks", "honey baked ham", "the honey baked",
+    "omaha steaks", "wild fork", "honey baked ham", "the honey baked",
     "arby's", "boston market",
     # Wine chains
     "wine.com", "vivino", "drizly",

@@ -15,20 +15,33 @@ from datetime import datetime
 
 import pandas as pd
 
-from discover import discover_leads
+from butcher import (
+    add_why_high_quality,
+    load_eligible_butcher_cities,
+    save_eligible_cities,
+    timestamped_path,
+)
+from butcher_sources import run_butcher_source_scrape
+from config import SERPER_API_KEY
+from discover import discover_leads, discover_leads_for_cities
 from enrich import (
     enrich_websites, enrich_instagram, enrich_facebook, enrich_press_and_awards,
     enrich_google_reviews, enrich_instagram_reels, enrich_instagram_posts,
     enrich_booking_availability,
 )
-from score import score_leads
+from score import score_leads, score_butcher_leads
 
 
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "output")
+BUTCHER_OUTPUT_DIR = os.path.join(OUTPUT_DIR, "butcher")
 
 
 def ensure_output_dir():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+
+def ensure_butcher_output_dir():
+    os.makedirs(BUTCHER_OUTPUT_DIR, exist_ok=True)
 
 
 def run_discovery(types: list[str] | None = None, max_searches: int = 0) -> pd.DataFrame:
@@ -44,6 +57,73 @@ def run_discovery(types: list[str] | None = None, max_searches: int = 0) -> pd.D
     df.to_csv(path, index=False)
     print(f"\nSaved discovery results to {path}")
 
+    return df
+
+
+def run_butcher_discovery(
+    max_searches: int = 0,
+    min_population: int = 25_000,
+    cities_path: str | None = None,
+) -> pd.DataFrame:
+    """Butcher-only national discovery into output/butcher."""
+    ensure_butcher_output_dir()
+
+    if not SERPER_API_KEY:
+        print("\nMissing SERPER_API_KEY. Add it to .env before running live butcher discovery.")
+        sys.exit(1)
+
+    cities_df = load_eligible_butcher_cities(
+        min_population=min_population,
+        cities_path=cities_path,
+    )
+    cities_csv = save_eligible_cities(cities_df, BUTCHER_OUTPUT_DIR)
+
+    print(f"\n{'='*60}")
+    print("BUTCHER NATIONAL CITY COVERAGE")
+    print(f"{'='*60}")
+    print(f"Eligible cities: {len(cities_df)}")
+    print("City source: static top U.S. cities list")
+    print("Excluded states: HI, IN, IA, KS, NV, ND, SD")
+    print(f"Saved eligible cities to {cities_csv}")
+
+    df = discover_leads_for_cities(
+        types=["butcher"],
+        cities=cities_df["location"].tolist(),
+        max_searches=max_searches,
+        source="google_maps",
+        niche_min_reviews=5,
+        niche_min_rating=3.7,
+    )
+
+    if df.empty:
+        print("\nNo butcher leads found. Check API key and try again.")
+        sys.exit(1)
+
+    df["butcher_source"] = df.get("butcher_source", "google_maps")
+    df["source"] = df.get("source", "google_maps")
+
+    path = os.path.join(BUTCHER_OUTPUT_DIR, "1_discovered_butchers.csv")
+    df.to_csv(path, index=False)
+    print(f"\nSaved butcher discovery results to {path}")
+
+    return df
+
+
+def run_butcher_source_discovery() -> pd.DataFrame:
+    """Run source-only butcher scraping into output/butcher."""
+    ensure_butcher_output_dir()
+
+    print(f"\n{'='*60}")
+    print("BUTCHER SOURCE SCRAPE")
+    print(f"{'='*60}")
+    print("Sources: Good Meat Finder, EatWild, Good Food Awards, AGA, stockist pages")
+    print("Skipping Google/Serper discovery and all enrichment phases")
+
+    df, status_df = run_butcher_source_scrape(BUTCHER_OUTPUT_DIR)
+    print(f"\nSource scrape statuses:")
+    if not status_df.empty:
+        print(status_df[["source", "status", "rows", "url"]].to_string(index=False))
+    print(f"\nSaved {len(df)} deduped source leads to {BUTCHER_OUTPUT_DIR}/1_discovered_butchers.csv")
     return df
 
 
@@ -101,6 +181,25 @@ def run_enrichment(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def run_butcher_enrichment(df: pd.DataFrame) -> pd.DataFrame:
+    """Run butcher enrichment and save the consolidated butcher CSV."""
+    ensure_butcher_output_dir()
+
+    df = enrich_websites(df)
+    df = enrich_instagram(df)
+    df = enrich_facebook(df)
+    df = enrich_press_and_awards(df)
+    df = enrich_google_reviews(df)
+    df = enrich_instagram_reels(df)
+    df = enrich_instagram_posts(df)
+
+    path = os.path.join(BUTCHER_OUTPUT_DIR, "2_enriched_butchers.csv")
+    df.to_csv(path, index=False)
+    print(f"\nSaved butcher enrichment to {path}")
+
+    return df
+
+
 def run_scoring(df: pd.DataFrame) -> pd.DataFrame:
     """Phase 3: Score and rank."""
     df = score_leads(df)
@@ -135,6 +234,37 @@ def run_scoring(df: pd.DataFrame) -> pd.DataFrame:
     path_top = os.path.join(OUTPUT_DIR, f"3_top_leads_{timestamp}.csv")
     df_top[available_cols].to_csv(path_top, index=False)
     print(f"Saved {len(df_top)} top leads (A+B tier) to {path_top}")
+
+    return df
+
+
+def run_butcher_scoring(df: pd.DataFrame) -> pd.DataFrame:
+    """Score butcher leads and save butcher-specific exports."""
+    ensure_butcher_output_dir()
+    df = score_butcher_leads(df)
+    df = add_why_high_quality(df)
+
+    path_full = timestamped_path(BUTCHER_OUTPUT_DIR, "3_scored_butchers")
+    df.to_csv(path_full, index=False)
+    print(f"\nSaved all scored butcher leads to {path_full}")
+
+    df_top = df[df["tier"].isin(["A - Hot Lead", "B - Warm Lead"])]
+    output_cols = [
+        "name", "address", "city", "state", "phone", "website", "business_type",
+        "butcher_source", "lead_score", "tier", "why_high_quality",
+        "has_meat_box", "has_csa_or_share", "has_preorder", "ships_meat",
+        "has_pickup", "has_subscription_language", "animal_welfare_signal",
+        "whole_animal_signal", "dry_aged_signal", "source_quality_score",
+        "review_count", "rating", "follower_count", "avg_video_views",
+        "avg_likes", "press_mentions", "press_sources", "awards_count",
+        "awards_list", "instagram_url", "ig_followers", "facebook_url",
+        "fb_likes", "has_email_signup", "has_ecommerce", "has_online_ordering",
+    ]
+    available_cols = [c for c in output_cols if c in df_top.columns]
+
+    path_top = timestamped_path(BUTCHER_OUTPUT_DIR, "3_top_butchers")
+    df_top[available_cols].to_csv(path_top, index=False)
+    print(f"Saved {len(df_top)} top butcher leads (A+B tier) to {path_top}")
 
     return df
 
@@ -176,6 +306,13 @@ def main():
     parser.add_argument("--enrich", type=str, help="Enrich from existing CSV path")
     parser.add_argument("--enrich-remaining", type=str, help="Run only remaining enrichment phases (reels, posts, availability) + scoring")
     parser.add_argument("--score", type=str, help="Score from existing CSV path")
+    parser.add_argument("--butcher-national", action="store_true", help="Run national butcher discovery, enrichment, and scoring")
+    parser.add_argument("--butcher-sources", action="store_true", help="Run source-only butcher scraping without enrichment")
+    parser.add_argument("--butcher-discover-only", action="store_true", help="Only run national butcher discovery")
+    parser.add_argument("--butcher-enrich", type=str, help="Run butcher enrichment + scoring from an existing butcher discovery CSV")
+    parser.add_argument("--butcher-score", type=str, help="Run butcher scoring from an existing enriched butcher CSV")
+    parser.add_argument("--city-population-min", type=int, default=25_000, help="Minimum population for national butcher city coverage")
+    parser.add_argument("--cities-path", type=str, help="Optional local Census Gazetteer-style places file")
     args = parser.parse_args()
 
     types_filter = [t.strip() for t in args.types.split(",")] if args.types else None
@@ -187,6 +324,33 @@ def main():
     if types_filter:
         print(f"  Types filter: {', '.join(types_filter)}")
     print(f"{'#'*60}")
+
+    if args.butcher_score:
+        df = pd.read_csv(args.butcher_score)
+        run_butcher_scoring(df)
+        return
+
+    if args.butcher_sources:
+        run_butcher_source_discovery()
+        return
+
+    if args.butcher_enrich:
+        df = pd.read_csv(args.butcher_enrich)
+        df = run_butcher_enrichment(df)
+        run_butcher_scoring(df)
+        return
+
+    if args.butcher_national or args.butcher_discover_only:
+        df = run_butcher_discovery(
+            max_searches=args.max_searches,
+            min_population=args.city_population_min,
+            cities_path=args.cities_path,
+        )
+        if args.butcher_discover_only:
+            return
+        df = run_butcher_enrichment(df)
+        run_butcher_scoring(df)
+        return
 
     if args.score:
         # Just score existing enriched data

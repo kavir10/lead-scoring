@@ -118,7 +118,20 @@ def discover_leads(types: list[str] | None = None, max_searches: int = 0) -> pd.
                When set, only search categories mapping to these types are run.
         max_searches: Stop after this many API calls (0 = unlimited).
     """
+    return discover_leads_for_cities(types=types, cities=CITIES, max_searches=max_searches)
+
+
+def discover_leads_for_cities(
+    types: list[str] | None = None,
+    cities: list[str] | None = None,
+    max_searches: int = 0,
+    source: str = "google_maps",
+    niche_min_reviews: int = 20,
+    niche_min_rating: float = 4.0,
+) -> pd.DataFrame:
+    """Run all search queries across provided cities and deduplicate."""
     all_results = []
+    active_cities = cities or CITIES
 
     # Filter search queries by requested types
     active_queries = SEARCH_QUERIES
@@ -132,7 +145,7 @@ def discover_leads(types: list[str] | None = None, max_searches: int = 0) -> pd.
             return pd.DataFrame()
 
     # Count total searches for progress display
-    total_searches = sum(len(queries) for queries in active_queries.values()) * len(CITIES)
+    total_searches = sum(len(queries) for queries in active_queries.values()) * len(active_cities)
     if max_searches > 0:
         total_searches = min(total_searches, max_searches)
     search_num = 0
@@ -144,7 +157,7 @@ def discover_leads(types: list[str] | None = None, max_searches: int = 0) -> pd.
     print(f"{'='*60}")
     print(f"Search categories: {', '.join(active_queries.keys())}")
     limit_note = f" (capped at {max_searches})" if max_searches > 0 else ""
-    print(f"Running up to {total_searches} searches across {len(CITIES)} cities{limit_note}")
+    print(f"Running up to {total_searches} searches across {len(active_cities)} cities{limit_note}")
     print()
 
     for category, queries in active_queries.items():
@@ -156,7 +169,7 @@ def discover_leads(types: list[str] | None = None, max_searches: int = 0) -> pd.
         for query in queries:
             if hit_limit:
                 break
-            for city in CITIES:
+            for city in active_cities:
                 search_num += 1
                 if max_searches > 0 and search_num > max_searches:
                     print(f"\n  Reached max searches limit ({max_searches}). Stopping discovery.")
@@ -170,6 +183,9 @@ def discover_leads(types: list[str] | None = None, max_searches: int = 0) -> pd.
                 for r in results:
                     r["business_type"] = business_type
                     r["search_category"] = category
+                    r["source"] = source
+                    if business_type == "butcher":
+                        r["butcher_source"] = source
 
                 all_results.extend(results)
                 time.sleep(0.5)  # Rate limit
@@ -193,13 +209,10 @@ def discover_leads(types: list[str] | None = None, max_searches: int = 0) -> pd.
     # Clean phone numbers for dedup
     df["phone_clean"] = df["phone"].str.replace(r"[^\d]", "", regex=True)
 
-    # Dedup by phone (most reliable)
-    df_deduped = df.drop_duplicates(subset=["phone_clean"], keep="first")
-
-    # For entries without phone, dedup by name + address
-    mask_no_phone = df_deduped["phone_clean"] == ""
-    df_with_phone = df_deduped[~mask_no_phone]
-    df_no_phone = df_deduped[mask_no_phone].drop_duplicates(
+    # Dedup by phone when present; for entries without phone, dedup by name + address.
+    mask_no_phone = df["phone_clean"] == ""
+    df_with_phone = df[~mask_no_phone].drop_duplicates(subset=["phone_clean"], keep="first")
+    df_no_phone = df[mask_no_phone].drop_duplicates(
         subset=["name", "address"], keep="first"
     )
 
@@ -223,10 +236,10 @@ def discover_leads(types: list[str] | None = None, max_searches: int = 0) -> pd.
 
     # --- Quality floor: reviews and rating thresholds ---
     # Restaurants: 50+ reviews, 4.2+ rating (high volume, stricter floor)
-    # Butcher/Wine: 20+ reviews, 4.0+ rating (niche businesses, fewer reviews)
+    # Butcher/Wine defaults: 20+ reviews, 4.0+ rating (niche businesses, fewer reviews)
     is_restaurant = df_final["business_type"] == "restaurant"
     restaurant_mask = is_restaurant & (df_final["review_count"] >= 50) & (df_final["rating"] >= 4.2)
-    niche_mask = ~is_restaurant & (df_final["review_count"] >= 20) & (df_final["rating"] >= 4.0)
+    niche_mask = ~is_restaurant & (df_final["review_count"] >= niche_min_reviews) & (df_final["rating"] >= niche_min_rating)
     df_final = df_final[restaurant_mask | niche_mask]
 
     # --- Convert price_level to numeric tier ---
@@ -241,7 +254,11 @@ def discover_leads(types: list[str] | None = None, max_searches: int = 0) -> pd.
 
     print(f"\nAfter deduplication: {len(df_final)} unique leads (removed {before - len(df_final)} dupes)")
     print(f"  Filtered out {n_chains} chains, {n_liquor} liquor stores")
-    print(f"  Required: website + reviews floor (50 restaurant / 20 butcher & wine)")
+    print(
+        "  Required: website + reviews floor "
+        f"(50 restaurant / {niche_min_reviews} butcher & wine), "
+        f"rating floor (4.2 restaurant / {niche_min_rating} butcher & wine)"
+    )
 
     # Breakdown by type
     for bt in df_final["business_type"].unique():
