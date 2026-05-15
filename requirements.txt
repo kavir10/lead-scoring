@@ -1,7 +1,10 @@
 requests
+httpx
+selectolax
 beautifulsoup4
 pandas
 python-dotenv
 apify-client
 python-whois
 playwright
+anthropic

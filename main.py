@@ -31,9 +31,9 @@ def ensure_output_dir():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 
-def run_discovery(types: list[str] | None = None, max_searches: int = 0) -> pd.DataFrame:
+def run_discovery(types: list[str] | None = None, max_searches: int = 0, max_cities: int = 0) -> pd.DataFrame:
     """Phase 1: Find leads."""
-    df = discover_leads(types=types, max_searches=max_searches)
+    df = discover_leads(types=types, max_searches=max_searches, max_cities=max_cities)
 
     if df.empty:
         print("\nNo leads found. Check API key and try again.")
@@ -47,58 +47,48 @@ def run_discovery(types: list[str] | None = None, max_searches: int = 0) -> pd.D
     return df
 
 
-def run_enrichment(df: pd.DataFrame) -> pd.DataFrame:
-    """Phase 2: Enrich with website + social data."""
-    df = enrich_websites(df)
+ENRICHMENT_STEPS = [
+    ("websites",    enrich_websites,            "2_enriched_websites.csv"),
+    ("instagram",   enrich_instagram,           "2_enriched_instagram.csv"),
+    ("facebook",    enrich_facebook,            "2_enriched_social.csv"),
+    ("press",       enrich_press_and_awards,    "2_enriched_full.csv"),
+    ("reviews",     enrich_google_reviews,      "2_enriched_reviews.csv"),
+    ("reels",       enrich_instagram_reels,     "2_enriched_reels.csv"),
+    ("posts",       enrich_instagram_posts,     "2_enriched_posts.csv"),
+    ("availability", enrich_booking_availability, "2_enriched_availability.csv"),
+]
 
+
+def run_enrichment(df: pd.DataFrame, start_from: str | None = None) -> pd.DataFrame:
+    """Phase 2: Enrich with website + social data. Optionally skip to a step."""
     ensure_output_dir()
-    path = os.path.join(OUTPUT_DIR, "2_enriched_websites.csv")
-    df.to_csv(path, index=False)
-    print(f"\nSaved website enrichment to {path}")
+    step_names = [s[0] for s in ENRICHMENT_STEPS]
 
-    df = enrich_instagram(df)
+    if start_from:
+        if start_from not in step_names:
+            print(f"Unknown step '{start_from}'. Valid: {', '.join(step_names)}")
+            sys.exit(1)
+        start_idx = step_names.index(start_from)
+    else:
+        start_idx = 0
 
-    path = os.path.join(OUTPUT_DIR, "2_enriched_instagram.csv")
-    df.to_csv(path, index=False)
-    print(f"\nSaved Instagram enrichment to {path}")
-
-    df = enrich_facebook(df)
-
-    path = os.path.join(OUTPUT_DIR, "2_enriched_social.csv")
-    df.to_csv(path, index=False)
-    print(f"\nSaved social enrichment to {path}")
-
-    df = enrich_press_and_awards(df)
-
-    path = os.path.join(OUTPUT_DIR, "2_enriched_full.csv")
-    df.to_csv(path, index=False)
-    print(f"\nSaved full enrichment to {path}")
-
-    df = enrich_google_reviews(df)
-
-    path = os.path.join(OUTPUT_DIR, "2_enriched_reviews.csv")
-    df.to_csv(path, index=False)
-    print(f"\nSaved Google Reviews enrichment to {path}")
-
-    df = enrich_instagram_reels(df)
-
-    path = os.path.join(OUTPUT_DIR, "2_enriched_reels.csv")
-    df.to_csv(path, index=False)
-    print(f"\nSaved Instagram Reels enrichment to {path}")
-
-    df = enrich_instagram_posts(df)
-
-    path = os.path.join(OUTPUT_DIR, "2_enriched_posts.csv")
-    df.to_csv(path, index=False)
-    print(f"\nSaved Instagram Posts enrichment to {path}")
-
-    df = enrich_booking_availability(df)
-
-    path = os.path.join(OUTPUT_DIR, "2_enriched_availability.csv")
-    df.to_csv(path, index=False)
-    print(f"\nSaved booking availability enrichment to {path}")
+    for name, func, filename in ENRICHMENT_STEPS[start_idx:]:
+        df = func(df)
+        path = os.path.join(OUTPUT_DIR, filename)
+        tmp = path + ".tmp"
+        df.to_csv(tmp, index=False)
+        os.replace(tmp, path)
+        print(f"\nSaved {name} enrichment to {path}")
 
     return df
+
+
+def build_output_filename(df: pd.DataFrame, suffix: str, owner: str = "kavir") -> str:
+    """Build filename: custom-serper-scoring_{owner}_{date}_{verticals}_{count}_{suffix}.csv"""
+    date_str = datetime.now().strftime("%Y%m%d")
+    verticals = sorted(df["business_type"].unique())
+    vertical_str = "-".join(v.replace("_", "-") for v in verticals)
+    return f"custom-serper-scoring_{owner}_{date_str}_{vertical_str}_{len(df)}_{suffix}.csv"
 
 
 def run_scoring(df: pd.DataFrame) -> pd.DataFrame:
@@ -106,10 +96,10 @@ def run_scoring(df: pd.DataFrame) -> pd.DataFrame:
     df = score_leads(df)
 
     ensure_output_dir()
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     # Full results
-    path_full = os.path.join(OUTPUT_DIR, f"3_scored_all_{timestamp}.csv")
+    fname_all = build_output_filename(df, "all")
+    path_full = os.path.join(OUTPUT_DIR, fname_all)
     df.to_csv(path_full, index=False)
     print(f"\nSaved all scored leads to {path_full}")
 
@@ -132,7 +122,8 @@ def run_scoring(df: pd.DataFrame) -> pd.DataFrame:
     ]
     available_cols = [c for c in output_cols if c in df_top.columns]
 
-    path_top = os.path.join(OUTPUT_DIR, f"3_top_leads_{timestamp}.csv")
+    fname_top = build_output_filename(df_top, "top")
+    path_top = os.path.join(OUTPUT_DIR, fname_top)
     df_top[available_cols].to_csv(path_top, index=False)
     print(f"Saved {len(df_top)} top leads (A+B tier) to {path_top}")
 
@@ -172,9 +163,11 @@ def main():
     parser.add_argument("--discover", action="store_true", help="Only run discovery")
     parser.add_argument("--types", type=str, help="Comma-separated business types to discover (e.g. butcher,wine_store)")
     parser.add_argument("--max-searches", type=int, default=0, help="Max Serper API calls (0 = unlimited)")
+    parser.add_argument("--max-cities", type=int, default=0, help="Limit to first N cities (0 = all)")
     parser.add_argument("--merge", type=str, help="Merge new discovery with existing CSV (path to existing)")
     parser.add_argument("--enrich", type=str, help="Enrich from existing CSV path")
     parser.add_argument("--enrich-remaining", type=str, help="Run only remaining enrichment phases (reels, posts, availability) + scoring")
+    parser.add_argument("--enrich-from", type=str, help="Start enrichment from step (websites,instagram,facebook,press,reviews,reels,posts,availability)")
     parser.add_argument("--score", type=str, help="Score from existing CSV path")
     args = parser.parse_args()
 
@@ -197,35 +190,19 @@ def main():
     if args.enrich_remaining:
         # Run only the remaining enrichment phases (reels, posts, availability) + scoring
         df = pd.read_csv(args.enrich_remaining)
-        ensure_output_dir()
-
-        df = enrich_instagram_reels(df)
-        path = os.path.join(OUTPUT_DIR, "2_enriched_reels.csv")
-        df.to_csv(path, index=False)
-        print(f"\nSaved Instagram Reels enrichment to {path}")
-
-        df = enrich_instagram_posts(df)
-        path = os.path.join(OUTPUT_DIR, "2_enriched_posts.csv")
-        df.to_csv(path, index=False)
-        print(f"\nSaved Instagram Posts enrichment to {path}")
-
-        df = enrich_booking_availability(df)
-        path = os.path.join(OUTPUT_DIR, "2_enriched_availability.csv")
-        df.to_csv(path, index=False)
-        print(f"\nSaved booking availability enrichment to {path}")
-
+        df = run_enrichment(df, start_from="reels")
         run_scoring(df)
         return
 
     if args.enrich:
         # Enrich existing discovery data
         df = pd.read_csv(args.enrich)
-        df = run_enrichment(df)
+        df = run_enrichment(df, start_from=args.enrich_from)
         run_scoring(df)
         return
 
     if args.discover:
-        df = run_discovery(types=types_filter, max_searches=args.max_searches)
+        df = run_discovery(types=types_filter, max_searches=args.max_searches, max_cities=args.max_cities)
         if args.merge and not df.empty:
             df = merge_discovery(args.merge, df)
             path = os.path.join(OUTPUT_DIR, "1_discovered_merged.csv")
@@ -234,7 +211,7 @@ def main():
         return
 
     # Full pipeline
-    df = run_discovery(types=types_filter, max_searches=args.max_searches)
+    df = run_discovery(types=types_filter, max_searches=args.max_searches, max_cities=args.max_cities)
     if args.merge and not df.empty:
         df = merge_discovery(args.merge, df)
     df = run_enrichment(df)

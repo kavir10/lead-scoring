@@ -17,9 +17,11 @@ def score_reservation_difficulty_composite(row: pd.Series) -> float:
     platform_map = {3: 1.0, 2: 0.7, 1: 0.4, 0: 0.0}
     platform_score = platform_map.get(platform_value, 0.0)
 
-    review_sentiment = float(row.get("review_difficulty_sentiment", 0) or 0)
+    review_raw = row.get("review_difficulty_sentiment", 0)
+    review_sentiment = 0.0 if pd.isna(review_raw) else float(review_raw)
 
-    availability = float(row.get("booking_availability_score", 1.0) or 1.0)
+    avail_raw = row.get("booking_availability_score", 1.0)
+    availability = 1.0 if pd.isna(avail_raw) else float(avail_raw)
     availability_difficulty = 1.0 - availability  # invert: fewer slots = harder
 
     composite = (
@@ -183,22 +185,50 @@ _SCORE_DISPATCH = {
 }
 
 
-def compute_lead_score(row: pd.Series) -> float:
-    """Compute total lead score for a single row."""
-    w = SCORING_WEIGHTS
-    score = 0.0
+RESERVATION_TYPES = {"restaurant", "wine_bar"}
 
-    # Composite reservation difficulty (uses full row for sub-signals)
-    score += score_reservation_difficulty_composite(row) * w["reservation_difficulty"]
+# Signals that require IG/Apify enrichment — exclude weight when data is missing
+_ENRICHMENT_ONLY_SIGNALS = {"avg_video_views", "avg_likes", "follower_count"}
+
+
+def compute_lead_score(row: pd.Series) -> float:
+    """Compute total lead score for a single row.
+
+    For non-restaurant/non-bar types, reservation_difficulty is excluded.
+    When Apify-dependent signals have no data (0/NaN), their weight is
+    redistributed so the score is still out of 100.
+    """
+    w = SCORING_WEIGHTS
+    biz_type = str(row.get("business_type", "")).strip()
+    include_reservation = biz_type in RESERVATION_TYPES
+
+    score = 0.0
+    max_possible = 0.0
+
+    # Composite reservation difficulty — only for restaurants/wine bars, skip if no data
+    if include_reservation:
+        res_composite = score_reservation_difficulty_composite(row)
+        if res_composite > 0:
+            score += res_composite * w["reservation_difficulty"]
 
     # Numeric / tiered signals
     for weight_key, (fn, col) in _SCORE_DISPATCH.items():
         default = None if col == "rating" else 0
-        score += fn(row.get(col, default)) * w[weight_key]
+        raw = row.get(col, default)
+        val = 0 if (raw is None or (isinstance(raw, float) and np.isnan(raw))) else raw
+
+        # Enrichment-only signals: skip entirely when no data (no penalty)
+        if weight_key in _ENRICHMENT_ONLY_SIGNALS and val == 0:
+            continue
+
+        score += fn(val) * w[weight_key]
 
     # Boolean signals
     score += (1.0 if row.get("has_email_signup") else 0.0) * w["has_email_signup"]
     score += (1.0 if row.get("has_ecommerce") else 0.0) * w["has_ecommerce"]
+
+    # No normalization — score reflects what was actually earned on 100-pt scale.
+    # Missing signals simply don't contribute; leads aren't penalized or inflated.
 
     return round(score, 1)
 
@@ -211,17 +241,31 @@ def score_leads(df: pd.DataFrame) -> pd.DataFrame:
 
     df["lead_score"] = df.apply(compute_lead_score, axis=1)
 
-    # Add tier labels
-    def get_tier(score):
-        if score >= 55:
-            return "A - Hot Lead"
-        elif score >= 35:
-            return "B - Warm Lead"
-        elif score >= 20:
-            return "C - Worth a Look"
-        return "D - Low Priority"
+    # Tier thresholds — niche types have fewer enrichment signals available,
+    # so use lower thresholds to keep the pyramid shape (A < B).
+    def get_tier(row):
+        s = row["lead_score"]
+        biz = str(row.get("business_type", "")).strip()
+        if biz in RESERVATION_TYPES:
+            # Restaurants / wine bars (full enrichment)
+            if s >= 55:
+                return "A - Hot Lead"
+            elif s >= 35:
+                return "B - Warm Lead"
+            elif s >= 20:
+                return "C - Worth a Look"
+            return "D - Low Priority"
+        else:
+            # Niche (partial enrichment — no IG/Apify data)
+            if s >= 45:
+                return "A - Hot Lead"
+            elif s >= 25:
+                return "B - Warm Lead"
+            elif s >= 15:
+                return "C - Worth a Look"
+            return "D - Low Priority"
 
-    df["tier"] = df["lead_score"].apply(get_tier)
+    df["tier"] = df.apply(get_tier, axis=1)
 
     df = df.sort_values("lead_score", ascending=False).reset_index(drop=True)
 
