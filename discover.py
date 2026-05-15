@@ -1,8 +1,12 @@
 """
 Phase 1: Discover leads via Serper Maps API across multiple business types.
+Uses concurrent requests to stay within Serper's 50 req/s rate limit.
 """
 import re
 import time
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 import requests
 import pandas as pd
 from config import (
@@ -10,9 +14,32 @@ from config import (
     BUSINESS_TYPE_MAP, CHAIN_KEYWORDS, LIQUOR_KEYWORDS,
 )
 
+# --- Concurrency settings ---
+MAX_WORKERS = 80       # 80 parallel HTTP requests; each blocks ~4s avg = ~20 req/s
+RATE_LIMIT_RPS = 45    # Stay under 50 req/s Serper Start plan limit
+_rate_lock = threading.Lock()
+_last_times: list[float] = []
+
+
+def _rate_limit():
+    """Token-bucket style rate limiter — blocks if we'd exceed RATE_LIMIT_RPS."""
+    with _rate_lock:
+        now = time.monotonic()
+        # Prune timestamps older than 1 second
+        while _last_times and _last_times[0] < now - 1.0:
+            _last_times.pop(0)
+        if len(_last_times) >= RATE_LIMIT_RPS:
+            sleep_until = _last_times[0] + 1.0
+            wait = sleep_until - now
+            if wait > 0:
+                time.sleep(wait)
+        _last_times.append(time.monotonic())
+
 
 def search_serper_maps(query: str, location: str, max_retries: int = 3) -> list[dict]:
     """Search Serper Maps API for a query + location combo with retry on rate limits."""
+    _rate_limit()
+
     url = "https://google.serper.dev/maps"
     headers = {
         "X-API-KEY": SERPER_API_KEY,
@@ -35,11 +62,16 @@ def search_serper_maps(query: str, location: str, max_retries: int = 3) -> list[
 
             results = []
             for p in places:
+                # Serper Maps returns the Google category as `type` (string) and `types` (list).
+                # `category` is not a real field — old code left this empty.
+                types_list = p.get("types") or []
                 results.append({
                     "name": p.get("title", ""),
                     "address": p.get("address", ""),
                     "rating": p.get("rating"),
                     "review_count": p.get("ratingCount", 0),
+                    "type": p.get("type", ""),
+                    "types": ", ".join(types_list) if isinstance(types_list, list) else "",
                     "category": p.get("category", ""),
                     "phone": p.get("phoneNumber", ""),
                     "website": p.get("website", ""),
@@ -56,40 +88,37 @@ def search_serper_maps(query: str, location: str, max_retries: int = 3) -> list[
             status = getattr(e.response, 'status_code', None) if hasattr(e, 'response') else None
             if status in (400, 429) and attempt < max_retries - 1:
                 wait = 2 ** (attempt + 1)  # 2s, 4s, 8s
-                print(f"rate limited, waiting {wait}s...", end=" ", flush=True)
                 time.sleep(wait)
                 continue
-            print(f"  [ERROR] Serper request failed for '{query}' in {location}: {e}")
             return []
     return []
 
 
-def parse_town_state(address: str) -> tuple[str, str]:
-    """Extract town and state from a Serper Maps address string.
+def _search_task(category: str, query: str, city: str) -> list[dict]:
+    """Single search task for the thread pool. Returns tagged results."""
+    business_type = BUSINESS_TYPE_MAP[category]
+    results = search_serper_maps(query, city)
+    for r in results:
+        r["business_type"] = business_type
+        r["search_category"] = category
+    return results
 
-    Typical formats:
-      '123 Main St, Chicago, IL 60601'
-      'Chicago, IL'
-      '123 Main St, New York, NY 10001, United States'
-    """
+
+def parse_town_state(address: str) -> tuple[str, str]:
+    """Extract town and state from a Serper Maps address string."""
     if not address:
         return "", ""
 
-    # Remove trailing country
     address = re.sub(r",?\s*United States\s*$", "", address, flags=re.I)
-
     parts = [p.strip() for p in address.split(",")]
 
-    # Walk backwards to find 'STATE ZIP' or 'STATE'
     for i in range(len(parts) - 1, -1, -1):
-        # Match 'IL 60601' or 'IL' or 'New York' (2-word state)
         m = re.match(r"^([A-Z]{2})\s*\d*$", parts[i].strip())
         if m:
             state = m.group(1)
             town = parts[i - 1].strip() if i >= 1 else ""
             return town, state
 
-    # Fallback: if address looks like "City, ST", try last two parts
     if len(parts) >= 2:
         m = re.match(r"^([A-Z]{2})$", parts[-1].strip())
         if m:
@@ -110,16 +139,14 @@ def is_liquor_store(name: str, category: str) -> bool:
     return any(kw in combined for kw in LIQUOR_KEYWORDS)
 
 
-def discover_leads(types: list[str] | None = None, max_searches: int = 0) -> pd.DataFrame:
-    """Run all search queries across all cities and deduplicate.
+def discover_leads(types: list[str] | None = None, max_searches: int = 0, max_cities: int = 0) -> pd.DataFrame:
+    """Run all search queries across all cities using concurrent requests.
 
     Args:
-        types: Optional list of business types to discover (e.g. ["butcher", "wine_store"]).
-               When set, only search categories mapping to these types are run.
+        types: Optional list of business types to discover.
         max_searches: Stop after this many API calls (0 = unlimited).
+        max_cities: Limit to the first N cities (0 = all).
     """
-    all_results = []
-
     # Filter search queries by requested types
     active_queries = SEARCH_QUERIES
     if types:
@@ -131,50 +158,68 @@ def discover_leads(types: list[str] | None = None, max_searches: int = 0) -> pd.
             print(f"No search categories match types: {types}")
             return pd.DataFrame()
 
-    # Count total searches for progress display
-    total_searches = sum(len(queries) for queries in active_queries.values()) * len(CITIES)
-    if max_searches > 0:
-        total_searches = min(total_searches, max_searches)
-    search_num = 0
-    hit_limit = False
+    cities = CITIES[:max_cities] if max_cities > 0 else CITIES
 
+    # Build full task list: (category, query, city)
+    tasks = []
+    for category, queries in active_queries.items():
+        for query in queries:
+            for city in cities:
+                tasks.append((category, query, city))
+
+    if max_searches > 0:
+        tasks = tasks[:max_searches]
+
+    total = len(tasks)
     type_label = ", ".join(types) if types else "all"
     print(f"\n{'='*60}")
     print(f"PHASE 1: DISCOVERING LEADS ({type_label})")
     print(f"{'='*60}")
     print(f"Search categories: {', '.join(active_queries.keys())}")
-    limit_note = f" (capped at {max_searches})" if max_searches > 0 else ""
-    print(f"Running up to {total_searches} searches across {len(CITIES)} cities{limit_note}")
+    print(f"Total searches: {total:,} across {len(cities)} cities")
+    print(f"Concurrency: {MAX_WORKERS} workers, rate limit {RATE_LIMIT_RPS} req/s")
     print()
 
-    for category, queries in active_queries.items():
-        if hit_limit:
-            break
-        business_type = BUSINESS_TYPE_MAP[category]
-        print(f"\n--- {category.upper()} (tagged as '{business_type}') ---")
+    all_results = []
+    completed = 0
+    errors = 0
+    start_time = time.monotonic()
+    last_print = start_time
 
-        for query in queries:
-            if hit_limit:
-                break
-            for city in CITIES:
-                search_num += 1
-                if max_searches > 0 and search_num > max_searches:
-                    print(f"\n  Reached max searches limit ({max_searches}). Stopping discovery.")
-                    hit_limit = True
-                    break
-                print(f"  [{search_num}/{total_searches}] \"{query}\" in {city}...", end=" ")
-                results = search_serper_maps(query, city)
-                print(f"found {len(results)}")
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
+        futures = {
+            pool.submit(_search_task, cat, query, city): (cat, query, city)
+            for cat, query, city in tasks
+        }
 
-                # Tag each result with business type and search category
-                for r in results:
-                    r["business_type"] = business_type
-                    r["search_category"] = category
-
+        for future in as_completed(futures):
+            completed += 1
+            try:
+                results = future.result()
                 all_results.extend(results)
-                time.sleep(0.5)  # Rate limit
+            except Exception:
+                errors += 1
 
-    print(f"\nTotal raw results: {len(all_results)}")
+            # Progress update every 2 seconds
+            now = time.monotonic()
+            if now - last_print >= 2.0 or completed == total:
+                elapsed = now - start_time
+                rate = completed / elapsed if elapsed > 0 else 0
+                eta_s = (total - completed) / rate if rate > 0 else 0
+                eta_m = eta_s / 60
+                print(
+                    f"  [{completed:,}/{total:,}] "
+                    f"{rate:.1f} req/s | "
+                    f"raw results: {len(all_results):,} | "
+                    f"errors: {errors} | "
+                    f"ETA: {eta_m:.0f}m",
+                    flush=True,
+                )
+                last_print = now
+
+    elapsed_total = time.monotonic() - start_time
+    print(f"\nDiscovery complete in {elapsed_total/60:.1f} minutes")
+    print(f"Total raw results: {len(all_results):,}")
 
     if not all_results:
         print("No results found!")
@@ -190,13 +235,9 @@ def discover_leads(types: list[str] | None = None, max_searches: int = 0) -> pd.
     # --- Dedup ---
     before = len(df)
 
-    # Clean phone numbers for dedup
     df["phone_clean"] = df["phone"].str.replace(r"[^\d]", "", regex=True)
-
-    # Dedup by phone (most reliable)
     df_deduped = df.drop_duplicates(subset=["phone_clean"], keep="first")
 
-    # For entries without phone, dedup by name + address
     mask_no_phone = df_deduped["phone_clean"] == ""
     df_with_phone = df_deduped[~mask_no_phone]
     df_no_phone = df_deduped[mask_no_phone].drop_duplicates(
@@ -222,8 +263,6 @@ def discover_leads(types: list[str] | None = None, max_searches: int = 0) -> pd.
     df_final = df_final[df_final["website"].str.len() > 0]
 
     # --- Quality floor: reviews and rating thresholds ---
-    # Restaurants: 50+ reviews, 4.2+ rating (high volume, stricter floor)
-    # Butcher/Wine: 20+ reviews, 4.0+ rating (niche businesses, fewer reviews)
     is_restaurant = df_final["business_type"] == "restaurant"
     restaurant_mask = is_restaurant & (df_final["review_count"] >= 50) & (df_final["rating"] >= 4.2)
     niche_mask = ~is_restaurant & (df_final["review_count"] >= 20) & (df_final["rating"] >= 4.0)
@@ -239,12 +278,12 @@ def discover_leads(types: list[str] | None = None, max_searches: int = 0) -> pd.
     # Sort by review count descending
     df_final = df_final.sort_values("review_count", ascending=False).reset_index(drop=True)
 
-    print(f"\nAfter deduplication: {len(df_final)} unique leads (removed {before - len(df_final)} dupes)")
+    print(f"\nAfter deduplication: {len(df_final):,} unique leads (removed {before - len(df_final):,} dupes)")
     print(f"  Filtered out {n_chains} chains, {n_liquor} liquor stores")
-    print(f"  Required: website + reviews floor (50 restaurant / 20 butcher & wine)")
+    print(f"  Required: website + reviews floor (50 restaurant / 20 niche)")
 
     # Breakdown by type
-    for bt in df_final["business_type"].unique():
+    for bt in sorted(df_final["business_type"].unique()):
         n = (df_final["business_type"] == bt).sum()
         print(f"  {bt}: {n}")
 

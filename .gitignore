@@ -3,3 +3,9 @@ output/
 __pycache__/
 *.pyc
 .venv/
+.DS_Store
+.claude/
+.playwright-mcp/
+scrape_beli/raw_posts_*.json
+scrape_beli/candidates_*.json
+scrape_beli/images/
