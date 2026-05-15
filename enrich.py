@@ -12,7 +12,7 @@ from urllib.parse import urljoin, urlparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from bs4 import BeautifulSoup
 import pandas as pd
-from apify_client import ApifyClient
+from core.apify import apify_client, run_actor as _run_apify_actor
 from config import (
     APIFY_API_TOKEN, RESERVATION_PLATFORMS,
     APIFY_ACTOR_GOOGLE_REVIEWS, APIFY_ACTOR_IG_REELS, APIFY_ACTOR_IG_POSTS,
@@ -308,12 +308,11 @@ def _scrape_ig_profiles_batch(usernames: list[str], batch_label: str = "") -> di
     """Scrape a single batch of IG profiles. Returns {username: data_dict}."""
     if not usernames:
         return {}
-    client = ApifyClient(APIFY_API_TOKEN)
     try:
-        run = client.actor("apify/instagram-profile-scraper").call(
-            run_input={"usernames": usernames}
+        items = _run_apify_actor(
+            "apify/instagram-profile-scraper",
+            {"usernames": usernames},
         )
-        items = client.dataset(run["defaultDatasetId"]).list_items().items
         results = {}
         for item in items:
             username = item.get("username", "").lower()
@@ -835,12 +834,11 @@ def _scrape_ig_reels_batch(usernames: list[str], batch_label: str = "") -> dict:
     """Scrape Reels for a batch. Returns {username: avg_views}."""
     if not usernames:
         return {}
-    client = ApifyClient(APIFY_API_TOKEN)
     try:
-        run = client.actor(APIFY_ACTOR_IG_REELS).call(
-            run_input={"username": usernames, "resultsLimit": 12}
+        items = _run_apify_actor(
+            APIFY_ACTOR_IG_REELS,
+            {"username": usernames, "resultsLimit": 12},
         )
-        items = client.dataset(run["defaultDatasetId"]).list_items().items
         reels_by_user = {}
         for item in items:
             owner = (item.get("ownerUsername") or "").lower()
@@ -944,12 +942,11 @@ def _scrape_ig_posts_batch(usernames: list[str], batch_label: str = "") -> dict:
     """Scrape Posts for a batch. Returns {username: avg_likes}."""
     if not usernames:
         return {}
-    client = ApifyClient(APIFY_API_TOKEN)
     try:
-        run = client.actor(APIFY_ACTOR_IG_POSTS).call(
-            run_input={"username": usernames, "resultsLimit": 12}
+        items = _run_apify_actor(
+            APIFY_ACTOR_IG_POSTS,
+            {"username": usernames, "resultsLimit": 12},
         )
-        items = client.dataset(run["defaultDatasetId"]).list_items().items
         posts_by_user = {}
         for item in items:
             owner = (item.get("ownerUsername") or "").lower()
@@ -1085,7 +1082,7 @@ def enrich_booking_availability(df: pd.DataFrame) -> pd.DataFrame:
         (today + timedelta(days=7)).isoformat(),
     ]
 
-    client = ApifyClient(APIFY_API_TOKEN)
+    client = apify_client()
     availability_scores = {}
 
     # --- OpenTable (reservation_difficulty == 1) ---

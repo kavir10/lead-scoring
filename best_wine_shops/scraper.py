@@ -9,6 +9,7 @@ import time
 import pandas as pd
 
 from awards._lib import SCHEMA, dedupe, filter_us, to_dataframe
+from core.geo import filter_banned_states
 
 from . import filters
 from .extractor import extract_from_text
@@ -140,6 +141,12 @@ def _to_df(rows: list[dict]) -> pd.DataFrame:
 
     # 1) US only
     df = filter_us(df)
+
+    # 1b) Drop banned-state rows (Table22 doesn't ship to these)
+    before_banned = len(df)
+    df = filter_banned_states(df)
+    if len(df) != before_banned:
+        print(f"  [filter] dropped {before_banned - len(df)} banned-state rows", flush=True)
 
     # 2) Hard chain filter
     if not df.empty:

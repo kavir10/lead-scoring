@@ -15,7 +15,8 @@ from urllib.parse import urljoin, urlparse
 
 import pandas as pd
 
-BANNED_STATES = {"HI", "IN", "IA", "KS", "NV", "ND", "SD"}
+from core.geo import BANNED_STATES, STATE_SLUGS
+from core.http_fetch import HEADERS
 
 try:
     import httpx
@@ -23,68 +24,6 @@ try:
 except ImportError:  # pragma: no cover - runtime guard for missing deps.
     httpx = None
     HTMLParser = None
-
-
-HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
-    )
-}
-
-STATE_SLUGS = {
-    "AL": ("Alabama", "alabama"),
-    "AK": ("Alaska", "alaska"),
-    "AZ": ("Arizona", "arizona"),
-    "AR": ("Arkansas", "arkansas"),
-    "CA": ("California", "california"),
-    "CO": ("Colorado", "colorado"),
-    "CT": ("Connecticut", "connecticut"),
-    "DE": ("Delaware", "delaware"),
-    "DC": ("DC", "dc"),
-    "FL": ("Florida", "florida"),
-    "GA": ("Georgia", "georgia"),
-    "HI": ("Hawaii", "hawaii"),
-    "ID": ("Idaho", "idaho"),
-    "IL": ("Illinois", "illinois"),
-    "IN": ("Indiana", "indiana"),
-    "IA": ("Iowa", "iowa"),
-    "KS": ("Kansas", "kansas"),
-    "KY": ("Kentucky", "kentucky"),
-    "LA": ("Louisiana", "louisiana"),
-    "ME": ("Maine", "maine"),
-    "MD": ("Maryland", "maryland"),
-    "MA": ("Massachusetts", "massachusetts"),
-    "MI": ("Michigan", "michigan"),
-    "MN": ("Minnesota", "minnesota"),
-    "MS": ("Mississippi", "mississippi"),
-    "MO": ("Missouri", "missouri"),
-    "MT": ("Montana", "montana"),
-    "NE": ("Nebraska", "nebraska"),
-    "NV": ("Nevada", "nevada"),
-    "NH": ("New Hampshire", "newhampshire"),
-    "NJ": ("New Jersey", "newjersey"),
-    "NM": ("New Mexico", "newmexico"),
-    "NY": ("New York", "newyork"),
-    "NC": ("North Carolina", "northcarolina"),
-    "ND": ("North Dakota", "northdakota"),
-    "OH": ("Ohio", "ohio"),
-    "OK": ("Oklahoma", "oklahoma"),
-    "OR": ("Oregon", "oregon"),
-    "PA": ("Pennsylvania", "pennsylvania"),
-    "RI": ("Rhode Island", "rhodeisland"),
-    "SC": ("South Carolina", "southcarolina"),
-    "SD": ("South Dakota", "southdakota"),
-    "TN": ("Tennessee", "tennessee"),
-    "TX": ("Texas", "texas"),
-    "UT": ("Utah", "utah"),
-    "VT": ("Vermont", "vermont"),
-    "VA": ("Virginia", "virginia"),
-    "WA": ("Washington", "washington"),
-    "WV": ("West Virginia", "westvirginia"),
-    "WI": ("Wisconsin", "wisconsin"),
-    "WY": ("Wyoming", "wyoming"),
-}
 
 GOOD_MEAT_FINDER_URL = "https://goodmeatproject.org/finder"
 GOOD_FOOD_CHARCUTERIE_URL = "https://goodfoodfdn.org/awards/winners/2025/charcuterie/"
@@ -372,10 +311,18 @@ def scrape_good_meat_finder(client: "httpx.Client") -> ScrapeResult:
     return ScrapeResult(rows=rows, status={"source": "good_meat_finder", "url": url, "status": resp.status_code, "rows": len(rows)})
 
 
-def scrape_eatwild(client: "httpx.Client") -> ScrapeResult:
+def scrape_eatwild(client: "httpx.Client", *, states_filter: set[str] | None = None) -> ScrapeResult:
+    """Scrape EatWild's per-state pages.
+
+    If `states_filter` is provided (set of 2-letter codes), restrict to those
+    states; otherwise iterate all non-banned states.
+    """
     rows = []
     statuses = []
     state_items = [(abbr, name, slug) for abbr, (name, slug) in STATE_SLUGS.items() if abbr not in BANNED_STATES]
+    if states_filter:
+        wanted = {s.upper() for s in states_filter}
+        state_items = [item for item in state_items if item[0] in wanted]
     for abbr, state_name, slug in state_items:
         url = urljoin(EATWILD_BASE, f"{slug}.html")
         try:
@@ -613,14 +560,28 @@ def verify_vendor_websites(df: pd.DataFrame, max_workers: int = 12, timeout: flo
     return merged
 
 
-def run_butcher_source_scrape(output_dir: str) -> tuple[pd.DataFrame, pd.DataFrame]:
+def run_butcher_source_scrape(
+    output_dir: str,
+    *,
+    states_filter: set[str] | None = None,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Run all butcher source scrapers; optionally restrict per-state scrapers
+    (EatWild) to a subset.
+
+    Args:
+        output_dir: directory to write CSV outputs.
+        states_filter: optional set of 2-letter state codes. Only affects
+            sources that iterate per state (currently just EatWild). National
+            directory sources (Good Meat Finder, AGA, stockist pages) always
+            run in full because they aren't state-sliced.
+    """
     os.makedirs(output_dir, exist_ok=True)
     raw_rows = []
     status_rows = []
     with _client() as client:
         for fn in [
             scrape_good_meat_finder,
-            scrape_eatwild,
+            lambda c: scrape_eatwild(c, states_filter=states_filter),
             scrape_good_food_awards,
             scrape_aga,
             scrape_stockist_pages,
