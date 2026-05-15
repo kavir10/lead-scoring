@@ -1235,56 +1235,10 @@ SCORING_WEIGHTS = {
 }
 
 # Chain keywords to filter out (applies to all business types)
-CHAIN_KEYWORDS = [
-    "walmart", "costco", "whole foods", "trader joe", "kroger",
-    "safeway", "albertsons", "publix", "heb", "h-e-b", "target",
-    "sam's club", "aldi", "wegmans", "sprouts", "fresh market",
-    "harris teeter", "food lion", "giant", "stop & shop",
-    "applebee", "chili's", "olive garden", "red lobster",
-    "outback", "cheesecake factory", "p.f. chang", "ruth's chris",
-    "capital grille", "morton's", "total wine", "binny's",
-    "bevmo", "spec's",
-    # Butcher/meat chains
-    "omaha steaks", "honey baked ham", "the honey baked",
-    "arby's", "boston market",
-    # Wine chains
-    "wine.com", "vivino", "drizly",
-    # Bakery chains
-    "nothing bundt cakes", "crumbl", "insomnia cookies", "great harvest",
-    "corner bakery", "au bon pain", "paris baguette", "tous les jours",
-    "porto's", "la boulange", "85 degrees", "85°c", "cinnabon",
-    "auntie anne", "einstein bagel", "bruegger's", "noah's bagels",
-    # Deli chains
-    "jason's deli", "mcalister's", "schlotzsky", "potbelly",
-    "quiznos", "which wich", "wawa", "sheetz",
-    # Specialty grocer chains
-    "fresh thyme", "earth fare", "natural grocers", "the fresh market",
-    "fresh market", "central market", "bristol farms", "gelson's",
-    "new seasons", "lazy acres",
-    # Non-food chains that appear in maps results
-    "michaels", "hobby lobby", "at home", "williams-sonoma", "williams sonoma",
-    "jersey mike", "jimmy john", "subway", "firehouse subs",
-    "panera", "chipotle", "five guys", "shake shack", "wingstop",
-    "buffalo wild wings", "hooters", "tgi friday", "denny's", "ihop",
-    "waffle house", "cracker barrel", "bob evans", "golden corral",
-    "texas roadhouse", "longhorn steakhouse", "carrabba",
-    "bonefish grill", "cheddar's", "steak 'n shake",
-    "home depot", "lowe's", "bed bath", "pottery barn", "crate & barrel",
-    "sur la table", "world market", "pier 1 imports", "restoration hardware",
-    "bass pro", "cabela's", "academy sports", "dick's sporting",
-    "petsmart", "petco", "tractor supply",
-    # Grocery / big-box chains
-    "99 ranch", "h mart", "grocery outlet", "food 4 less",
-    "homegoods", "home goods", "marshalls", "tj maxx", "tjmaxx",
-    "scheels", "rei ", "nordstrom", "macy's", "macys",
-    "best buy", "staples", "office depot",
-]
-
-# Liquor-store keywords to filter out of wine_store results
-LIQUOR_KEYWORDS = [
-    "liquor", "spirits", "beer & wine", "package store",
-    "beer store", "beverage",
-]
+# Chain + liquor keyword blocklists live in `core/keywords.py` so every
+# pipeline imports the same lists. Re-exported here for back-compat with
+# existing `from config import CHAIN_KEYWORDS, LIQUOR_KEYWORDS` call sites.
+from core.keywords import CHAIN_KEYWORDS, LIQUOR_KEYWORDS  # noqa: F401
 
 # Press / food media domains for mention searches
 PRESS_DOMAINS = [

@@ -13,6 +13,7 @@ from config import (
     SERPER_API_KEY, SEARCH_QUERIES, CITIES,
     BUSINESS_TYPE_MAP, CHAIN_KEYWORDS, LIQUOR_KEYWORDS,
 )
+from core.geo import BANNED_STATES
 
 # --- Concurrency settings ---
 MAX_WORKERS = 80       # 80 parallel HTTP requests; each blocks ~4s avg = ~20 req/s
@@ -259,6 +260,11 @@ def discover_leads(types: list[str] | None = None, max_searches: int = 0, max_ci
     n_liquor = liquor_mask.sum()
     df_final = df_final[~liquor_mask]
 
+    # --- Drop banned states (states Table22 doesn't ship to) ---
+    banned_mask = df_final["state"].str.upper().isin(BANNED_STATES)
+    n_banned = banned_mask.sum()
+    df_final = df_final[~banned_mask]
+
     # --- Must have a website (needed for enrichment) ---
     df_final = df_final[df_final["website"].str.len() > 0]
 
@@ -279,7 +285,7 @@ def discover_leads(types: list[str] | None = None, max_searches: int = 0, max_ci
     df_final = df_final.sort_values("review_count", ascending=False).reset_index(drop=True)
 
     print(f"\nAfter deduplication: {len(df_final):,} unique leads (removed {before - len(df_final):,} dupes)")
-    print(f"  Filtered out {n_chains} chains, {n_liquor} liquor stores")
+    print(f"  Filtered out {n_chains} chains, {n_liquor} liquor stores, {n_banned} banned-state rows")
     print(f"  Required: website + reviews floor (50 restaurant / 20 niche)")
 
     # Breakdown by type

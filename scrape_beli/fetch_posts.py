@@ -4,24 +4,20 @@ import json
 import os
 import sys
 
-from apify_client import ApifyClient
 from dotenv import load_dotenv
+
+from core.apify import run_actor
 
 load_dotenv()
 
-APIFY_API_TOKEN = os.getenv("APIFY_API_TOKEN")
 ACTOR = "apify/instagram-post-scraper"
 
 OUT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 def fetch(username: str, limit: int) -> list[dict]:
-    client = ApifyClient(APIFY_API_TOKEN)
     print(f"  Calling {ACTOR} for @{username}, limit={limit}...", flush=True)
-    run = client.actor(ACTOR).call(
-        run_input={"username": [username], "resultsLimit": limit}
-    )
-    items = client.dataset(run["defaultDatasetId"]).list_items().items
+    items = run_actor(ACTOR, {"username": [username], "resultsLimit": limit})
     print(f"  Got {len(items)} posts", flush=True)
     return items
 

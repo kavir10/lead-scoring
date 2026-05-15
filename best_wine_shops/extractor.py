@@ -11,17 +11,11 @@ apply a name-based blocklist as a backstop.
 from __future__ import annotations
 
 import json
-import os
 import re
 import textwrap
 
-from dotenv import load_dotenv
-
 from awards._lib import normalize_state
-
-load_dotenv(dotenv_path=os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env"))
-
-MODEL = "claude-sonnet-4-6"
+from core.llm import DEFAULT_MODEL as MODEL, anthropic_client
 
 _SYSTEM = textwrap.dedent("""
 You extract structured business listings from articles about the best wine
@@ -64,20 +58,12 @@ Rules:
 
 
 def _call_claude(text: str, hint: str) -> list[dict]:
-    try:
-        from anthropic import Anthropic
-    except ImportError:
-        print("  [llm] anthropic SDK not installed", flush=True)
+    client = anthropic_client()
+    if client is None:
         return []
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        print("  [llm] ANTHROPIC_API_KEY not set (shell may have empty override; "
-              "run with `unset ANTHROPIC_API_KEY && ...`)", flush=True)
-        return []
-
     user = (f"Hint: {hint}\n\n" if hint else "") + "Article text:\n\n" + text
     try:
-        msg = Anthropic(api_key=api_key).messages.create(
+        msg = client.messages.create(
             model=MODEL,
             max_tokens=4096,
             system=_SYSTEM,

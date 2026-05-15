@@ -7,69 +7,14 @@ import re
 import unicodedata
 from collections import OrderedDict
 
-from anthropic import Anthropic
-from apify_client import ApifyClient
 from dotenv import load_dotenv
+
+from core.apify import run_actor as _run_apify_actor
+from core.geo import BANNED_STATES, CITY_TO_STATE, NON_US_CITIES, US_STATES
 
 load_dotenv()
 
 OUT_DIR = os.path.dirname(os.path.abspath(__file__))
-client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-APIFY_TOKEN = os.getenv("APIFY_API_TOKEN")
-MODEL = "claude-haiku-4-5-20251001"
-
-# US states + DC. Anything else is dropped.
-US_STATES = {
-    "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD",
-    "MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC",
-    "SD","TN","TX","UT","VT","VA","WA","WV","WI","WY","DC",
-}
-
-# City -> state lookup (extend as needed). All keys lowercased.
-CITY_TO_STATE = {
-    "new york": "NY", "nyc": "NY", "brooklyn": "NY", "queens": "NY", "manhattan": "NY", "bronx": "NY",
-    "los angeles": "CA", "la": "CA", "silver lake": "CA", "west hollywood": "CA", "beverly hills": "CA",
-    "sawtelle": "CA", "east hollywood": "CA", "santa monica": "CA", "venice": "CA", "hollywood": "CA",
-    "san francisco": "CA", "sf": "CA", "oakland": "CA", "berkeley": "CA", "san jose": "CA",
-    "san diego": "CA", "long beach": "CA", "sacramento": "CA",
-    "chicago": "IL",
-    "boston": "MA", "cambridge": "MA", "somerville": "MA",
-    "washington": "DC", "dc": "DC", "washington dc": "DC", "washington, d.c.": "DC",
-    "philadelphia": "PA", "philly": "PA", "pittsburgh": "PA",
-    "seattle": "WA", "portland": "OR",
-    "miami": "FL", "tampa": "FL", "orlando": "FL", "fort lauderdale": "FL",
-    "austin": "TX", "houston": "TX", "dallas": "TX", "san antonio": "TX", "fort worth": "TX",
-    "atlanta": "GA", "savannah": "GA",
-    "nashville": "TN", "memphis": "TN", "knoxville": "TN",
-    "denver": "CO", "boulder": "CO",
-    "phoenix": "AZ", "scottsdale": "AZ", "tucson": "AZ",
-    "minneapolis": "MN", "saint paul": "MN", "st paul": "MN",
-    "detroit": "MI", "ann arbor": "MI",
-    "new orleans": "LA", "baton rouge": "LA",
-    "charleston": "SC", "raleigh": "NC", "charlotte": "NC", "asheville": "NC", "durham": "NC",
-    "las vegas": "NV", "reno": "NV",
-    "salt lake city": "UT",
-    "kansas city": "MO", "st louis": "MO", "saint louis": "MO",
-    "milwaukee": "WI", "madison": "WI",
-    "indianapolis": "IN",
-    "columbus": "OH", "cleveland": "OH", "cincinnati": "OH",
-    "richmond": "VA", "alexandria": "VA",
-    "providence": "RI",
-    "honolulu": "HI",
-    "anchorage": "AK",
-    "albuquerque": "NM", "santa fe": "NM",
-    "newark": "NJ", "jersey city": "NJ", "hoboken": "NJ",
-}
-
-# Definitely non-US cities to drop
-NON_US_CITIES = {
-    "london", "paris", "tokyo", "toronto", "montreal", "vancouver", "mexico city", "cdmx",
-    "berlin", "munich", "rome", "milan", "florence", "madrid", "barcelona", "amsterdam",
-    "dubai", "singapore", "hong kong", "shanghai", "beijing", "bangkok", "seoul",
-    "lisbon", "porto", "copenhagen", "stockholm", "vienna", "zurich", "buenos aires",
-    "lima", "rio de janeiro", "sao paulo", "sydney", "melbourne", "dublin", "manchester",
-    "edinburgh",
-}
 
 
 def norm_name(s: str) -> str:
@@ -164,16 +109,15 @@ def fetch_websites(handles: list[str]) -> dict:
         return {}
     handles = list(set(h.lower().strip() for h in handles if h))
     print(f"  Fetching profile data for {len(handles)} handles...", flush=True)
-    api = ApifyClient(APIFY_TOKEN)
     results = {}
     batch_size = 30
     for i in range(0, len(handles), batch_size):
         batch = handles[i:i + batch_size]
         try:
-            run = api.actor("apify/instagram-profile-scraper").call(
-                run_input={"usernames": batch}
+            items = _run_apify_actor(
+                "apify/instagram-profile-scraper",
+                {"usernames": batch},
             )
-            items = api.dataset(run["defaultDatasetId"]).list_items().items
             for it in items:
                 u = (it.get("username") or "").lower()
                 if u:
@@ -267,6 +211,12 @@ def main():
         c["state"] = state
         us_rows.append(c)
     print(f"  US-only: kept {len(us_rows)}, dropped {dropped} non-US/unresolved", flush=True)
+
+    # Banned-states filter (Table22 doesn't ship to these)
+    banned_dropped = sum(1 for c in us_rows if c["state"] in BANNED_STATES)
+    us_rows = [c for c in us_rows if c["state"] not in BANNED_STATES]
+    if banned_dropped:
+        print(f"  Banned-states: dropped {banned_dropped} rows in {sorted(BANNED_STATES)}", flush=True)
 
     # Dedupe
     deduped = dedupe(us_rows)

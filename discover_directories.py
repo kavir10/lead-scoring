@@ -36,13 +36,9 @@ from pathlib import Path
 
 import pandas as pd
 
-from awards._lib import (
-    SCHEMA,
-    ROOT,
-    dedupe,
-    filter_us,
-    to_dataframe,
-)
+from core import ROOT
+from core.csv_io import save_source as _save_source
+from core.schema import AWARDS_SCHEMA as SCHEMA, to_dataframe
 from directories import ALL_SOURCES, by_slug
 
 OUTPUT_DIR = ROOT / "output" / "directories"
@@ -50,20 +46,8 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def save_source(df: pd.DataFrame, slug: str, *, stamp: str | None = None) -> Path:
-    """Write per-source CSV to output/directories/<slug>_<YYYYMMDD>.csv.
-
-    Local mirror of awards._lib.save_source — same dedupe/filter pipeline,
-    different output directory. Kept local so this package doesn't require
-    modifying anything in awards/.
-    """
-    stamp = stamp or datetime.now().strftime("%Y%m%d")
-    path = OUTPUT_DIR / f"{slug}_{stamp}.csv"
-    df = to_dataframe(df.to_dict("records") if not df.empty else [])
-    df = filter_us(df)
-    df = dedupe(df)
-    df.to_csv(path, index=False)
-    print(f"  Saved {len(df):>5} rows -> {path.relative_to(ROOT)}", flush=True)
-    return path
+    """Write per-source CSV to output/directories/<slug>_<YYYYMMDD>.csv."""
+    return _save_source(df, slug, OUTPUT_DIR, stamp=stamp)
 
 
 def _select_sources(args) -> list[tuple]:
