@@ -9,8 +9,8 @@ from directories._stockists import scrape_stockist_page
 
 
 URLS = [
-    "https://heritagefoods.com/pages/restaurant-partners",
-    "https://heritagefoods.com/pages/our-restaurants",
+    "https://heritagefoods.com/pages/restaurants",
+    "https://heritagefoods.com/pages/restaurants-and-artisans",
 ]
 
 

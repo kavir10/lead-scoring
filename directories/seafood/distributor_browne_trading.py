@@ -1,33 +1,26 @@
 """
-Browne Trading Company — Portland ME-based premium seafood distributor.
+Browne Trading Company — premium caviar & seafood distributor (Portland, ME).
+
+Browne Trading lists no public customer roster. Their clientele (Daniel
+Boulud, Eric Ripert, Thomas Keller, Jean-Georges Vongerichten, Le Bernardin,
+Per Se) is widely cited in editorial coverage.
 """
 from __future__ import annotations
 
 import pandas as pd
 
-from directories._stockists import scrape_stockist_page
-
-
-URLS = [
-    "https://www.brownetrading.com/our-chefs/",
-    "https://www.brownetrading.com/restaurants/",
-]
+from directories._editorial_mining import mine_distributor_mentions
 
 
 def scrape(**_kwargs) -> pd.DataFrame:
-    return scrape_stockist_page(
-        importer_slug="browne_trading",
-        importer_name="Browne Trading Company",
-        urls=URLS,
-        strategy="llm",
-        tier=1,
-        retailers_only=False,
-        business_type_default="restaurant",
-        source_prefix="distributor",
-        distinction_label="Customer of",
-        hint=(
-            "Browne Trading Company chef + restaurant customer list. "
-            "Predominantly East Coast fine-dining restaurants serving Browne "
-            "Trading seafood. Mark all entries as category='restaurant'."
-        ),
+    return mine_distributor_mentions(
+        distributor_slug="browne_trading",
+        distributor_name="Browne Trading",
+        queries=[
+            '"Browne Trading" restaurant chef caviar',
+            '"Browne Trading" Michelin seafood',
+            '"Rod Mitchell" "Browne Trading" chef',
+            '"Browne Trading" purveyor New York',
+            '"Browne Trading" supplied OR serves restaurant',
+        ],
     )

@@ -10,8 +10,7 @@ from directories._stockists import scrape_stockist_page
 
 
 URLS = [
-    "https://www.zingermans.com/our-partners/",
-    "https://www.zingermans.com/about-us/our-friends/",
+    "https://www.zingermansfoodtours.com/our-partners",
 ]
 
 

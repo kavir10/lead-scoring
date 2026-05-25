@@ -9,8 +9,7 @@ from directories._stockists import scrape_stockist_page
 
 
 URLS = [
-    "https://www.greenpointfish.com/restaurants",
-    "https://www.greenpointfish.com/wholesale",
+    "https://greenpointfish.com/pages/wholesale",
 ]
 
 

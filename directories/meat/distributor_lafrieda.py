@@ -1,33 +1,26 @@
 """
 Pat LaFrieda — NYC-area premium beef distributor (steakhouses, burgers).
+
+LaFrieda does not publish a restaurant client list on their public site.
+Their clients (Eleven Madison Park, Minetta Tavern, Marea, Shake Shack, etc.)
+are surfaced in editorial coverage. We mine those mentions instead.
 """
 from __future__ import annotations
 
 import pandas as pd
 
-from directories._stockists import scrape_stockist_page
-
-
-URLS = [
-    "https://www.lafrieda.com/restaurants/",
-    "https://www.lafrieda.com/where-to-find-us/",
-]
+from directories._editorial_mining import mine_distributor_mentions
 
 
 def scrape(**_kwargs) -> pd.DataFrame:
-    return scrape_stockist_page(
-        importer_slug="lafrieda",
-        importer_name="Pat LaFrieda Meat Purveyors",
-        urls=URLS,
-        strategy="playwright",  # LaFrieda site is JS-heavy
-        tier=1,
-        retailers_only=False,
-        business_type_default="restaurant",
-        source_prefix="distributor",
-        distinction_label="Customer of",
-        hint=(
-            "Pat LaFrieda restaurant list. Northeast + national steakhouses, "
-            "burger spots, fine-dining venues serving LaFrieda beef. Mark every "
-            "entry as category='restaurant'."
-        ),
+    return mine_distributor_mentions(
+        distributor_slug="lafrieda",
+        distributor_name="Pat LaFrieda",
+        queries=[
+            '"Pat LaFrieda" restaurant chef beef',
+            '"LaFrieda" steakhouse New York burger',
+            '"supplied by Pat LaFrieda" restaurant',
+            '"LaFrieda" purveyor chef Michelin',
+            '"LaFrieda beef" restaurant menu',
+        ],
     )
