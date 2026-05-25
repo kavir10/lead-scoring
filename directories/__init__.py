@@ -69,11 +69,22 @@ ALL_SOURCES: list[tuple[str, str, int, str, str, bool]] = [
     ("d2c_zingermans",            "specialty", 1, "directories.specialty.d2c_zingermans",      "specialty", False),
 
     # Restaurants — Substack / paywalled food-writer recommendation lists (channel 06)
+    # Original Wave 2 batch
     ("substack_alicia_kennedy",   "restaurants", 1, "directories.restaurants.substack_alicia_kennedy",   "restaurant", False),
     ("substack_vittles",          "restaurants", 1, "directories.restaurants.substack_vittles",          "restaurant", False),
-    ("substack_adam_reiner",      "restaurants", 1, "directories.restaurants.substack_adam_reiner",      "restaurant", False),
     ("substack_anna_hezel",       "restaurants", 1, "directories.restaurants.substack_anna_hezel",       "restaurant", False),
     ("eater_newsletter",          "restaurants", 1, "directories.restaurants.eater_newsletter",          "restaurant", False),
+    # substack_adam_reiner removed: restaurantmanifesto.com SEO-hijacked (casino redirect).
+    # Wave 2.1 expansion — 9 more food-writer Substacks discovered via Serper
+    ("substack_lo_times",         "restaurants", 1, "directories.restaurants.substack_lo_times",         "restaurant", False),
+    ("substack_eater_ny",         "restaurants", 1, "directories.restaurants.substack_eater_ny",         "restaurant", False),
+    ("substack_the_hunger",       "restaurants", 1, "directories.restaurants.substack_the_hunger",       "restaurant", False),
+    ("substack_dining_out",       "restaurants", 1, "directories.restaurants.substack_dining_out",       "restaurant", False),
+    ("substack_pen_and_palate",   "restaurants", 1, "directories.restaurants.substack_pen_and_palate",   "restaurant", False),
+    ("substack_amateur_gourmet",  "restaurants", 1, "directories.restaurants.substack_amateur_gourmet",  "restaurant", False),
+    ("substack_food_section",     "restaurants", 1, "directories.restaurants.substack_food_section",     "restaurant", False),
+    ("substack_matt_rodbard",     "restaurants", 1, "directories.restaurants.substack_matt_rodbard",     "restaurant", False),
+    ("substack_relisher",         "restaurants", 1, "directories.restaurants.substack_relisher",         "restaurant", False),
 ]
 
 

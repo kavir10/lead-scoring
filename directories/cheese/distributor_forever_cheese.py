@@ -1,35 +1,26 @@
 """
-Forever Cheese — Italian + Spanish cheese importer. Restaurant + retail
-customer list.
+Forever Cheese — Italian + Spanish cheese importer.
+
+Where-to-buy page lists Forever Cheese's retail customers but layout
+defeats the stockist LLM parser. Pivoting to editorial mining for
+restaurant attributions in food press.
 """
 from __future__ import annotations
 
 import pandas as pd
 
-from directories._stockists import scrape_stockist_page
-
-
-URLS = [
-    "https://www.forevercheese.com/where-to-find-us/",
-    "https://www.forevercheese.com/partners/",
-]
+from directories._editorial_mining import mine_distributor_mentions
 
 
 def scrape(**_kwargs) -> pd.DataFrame:
-    return scrape_stockist_page(
-        importer_slug="forever_cheese",
-        importer_name="Forever Cheese",
-        urls=URLS,
-        strategy="llm",
-        tier=1,
-        retailers_only=False,
-        business_type_default="restaurant",
-        source_prefix="distributor",
-        distinction_label="Customer of",
-        hint=(
-            "Forever Cheese importer customer list. Split cheese shops "
-            "(category='shop') from restaurants (category='restaurant'). "
-            "Italian/Spanish cheese-focused venues skew toward restaurants and "
-            "wine bars."
-        ),
+    return mine_distributor_mentions(
+        distributor_slug="forever_cheese",
+        distributor_name="Forever Cheese",
+        queries=[
+            '"Forever Cheese" restaurant chef Italian Spanish',
+            '"Forever Cheese" Michelin menu',
+            '"Forever Cheese" importer restaurant cheese plate',
+            '"Forever Cheese" Manchego OR Pecorino restaurant',
+            '"Forever Cheese" Murray\'s OR Eataly OR restaurant',
+        ],
     )

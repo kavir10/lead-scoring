@@ -220,7 +220,9 @@ def _fetch_html_or_playwright(url: str, *, strategy: str) -> str:
         except Exception as e:
             print(f"  [stockist] playwright error for {url}: {e}", flush=True)
             return ""
-    return fetch_html(url)
+    # WAF-aware fetch: curl_cffi (TLS impersonation) -> plain requests -> Playwright
+    from directories._browser_fetch import fetch_html_with_fallback
+    return fetch_html_with_fallback(url)
 
 
 def _parse_html_list(html: str, css_selector: str) -> list[dict]:

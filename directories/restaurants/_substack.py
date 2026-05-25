@@ -67,21 +67,21 @@ Rules:
 
 
 def _fetch(url: str, *, prefer_playwright: bool = False) -> str:
-    if not prefer_playwright:
-        html = fetch_html(url)
-        if html and "<body" in html.lower():
-            return html
-    try:
-        with playwright_session() as (page, _ctx, _br):
-            page.goto(url, wait_until="domcontentloaded", timeout=45_000)
-            try:
-                page.wait_for_load_state("networkidle", timeout=10_000)
-            except Exception:
-                pass
-            return page.content() or ""
-    except Exception as e:
-        print(f"  [substack] playwright failed: {e}", flush=True)
-        return ""
+    if prefer_playwright:
+        try:
+            with playwright_session() as (page, _ctx, _br):
+                page.goto(url, wait_until="domcontentloaded", timeout=45_000)
+                try:
+                    page.wait_for_load_state("networkidle", timeout=10_000)
+                except Exception:
+                    pass
+                return page.content() or ""
+        except Exception as e:
+            print(f"  [substack] playwright failed: {e}", flush=True)
+            return ""
+    # WAF-aware: curl_cffi -> requests -> Playwright
+    from directories._browser_fetch import fetch_html_with_fallback
+    return fetch_html_with_fallback(url)
 
 
 def _extract_post_links(archive_html: str, base: str) -> list[tuple[str, str]]:

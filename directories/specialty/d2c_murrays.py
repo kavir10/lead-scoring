@@ -1,38 +1,27 @@
 """
-Murray's Cheese — affineur + retailer with national wholesale partner program.
+Murray's Cheese — affineur + national wholesale brand.
 
-The Murray's "Cheese 101" / "Our Cheesemakers" pages link to artisan cheese
-producers Murray's supports. These are smaller-scale US cheesemakers,
-extremely well-aligned ICP for the cheese vertical.
+The /makers page is mostly marketing + testimonial quotes. The actual
+cheesemaker directory is JS-loaded. Pivoting to editorial mining of
+"Murray's Cheese" mentions for restaurant customer attribution.
 """
 from __future__ import annotations
 
 import pandas as pd
 
-from directories._stockists import scrape_stockist_page
-
-
-URLS = [
-    "https://www.murrayscheese.com/our-cheesemakers",
-    "https://www.murrayscheese.com/cheese-101/cheesemakers",
-]
+from directories._editorial_mining import mine_distributor_mentions
 
 
 def scrape(**_kwargs) -> pd.DataFrame:
-    return scrape_stockist_page(
-        importer_slug="murrays_cheesemakers",
-        importer_name="Murray's Cheese (cheesemaker partners)",
-        urls=URLS,
-        strategy="llm",
-        tier=1,
-        retailers_only=False,
-        business_type_default="cheese",
-        source_prefix="d2c",
-        distinction_label="Murray's Cheese partner",
-        hint=(
-            "Murray's Cheese partner-cheesemakers page. Lists US artisan "
-            "cheesemakers (producers, not retail). Mark all entries as "
-            "category='shop' (will be coerced to business_type='cheese')."
-        ),
-        keep_categories={"shop", "unknown"},
+    return mine_distributor_mentions(
+        distributor_slug="murrays_cheesemakers",
+        distributor_name="Murray's Cheese",
+        business_type="restaurant",
+        queries=[
+            '"Murray\'s Cheese" restaurant cheese plate',
+            '"Murray\'s Cheese" chef restaurant menu',
+            '"from Murray\'s" cheese restaurant New York',
+            '"Murray\'s Cheese" wholesale customer',
+            '"Murray\'s" cheese restaurant Greenwich Village',
+        ],
     )
