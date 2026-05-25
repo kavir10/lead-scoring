@@ -185,7 +185,10 @@ def save_source(df: pd.DataFrame, slug: str, *, stamp: str | None = None) -> Pat
 
 
 def latest_for_slug(slug: str) -> Path | None:
-    files = sorted(OUTPUT_DIR.glob(f"{slug}_*.csv"))
+    # Use regex match on the date suffix so e.g. slug="michelin" doesn't
+    # accidentally pick up `michelin_grape_*.csv` (sibling slug).
+    pat = re.compile(rf"^{re.escape(slug)}_\d{{8}}\.csv$")
+    files = sorted(p for p in OUTPUT_DIR.glob(f"{slug}_*.csv") if pat.match(p.name))
     return files[-1] if files else None
 
 
