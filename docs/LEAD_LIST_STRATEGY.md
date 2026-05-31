@@ -253,6 +253,37 @@ Why a mix beats a tier-pure book:
 | 9 | Geographic proximity to existing T1s | Curation | Cheap, proven topology of high-AGMV neighborhoods |
 | 10 | Reddit city subreddit mining | Curation | Crowdsourced ground-truth, unique recall |
 
+### Wave 2 — net-new curation channels (added 2026-05-25)
+
+Eight additional channels added after a "what does v3 lookalike + the Wave 1
+list above still miss?" pass. Common theme: each rides a **graph that isn't
+keyword-similarity** (operator graph, person graph, behavioral graph, or
+supply-chain graph), so they recover venues invisible to brand-profile
+discovery. Per-channel detail in [`strategies/`](strategies/).
+
+| # | Channel | Motion | Why net-new | Detail |
+|---|---|---|---|---|
+| 11 | Sommelier / chef IG graph traversal | Curation | Rides social graph from named industry seeds, not hashtag surface area | [01](strategies/01_somm_chef_ig_graph.md) |
+| 12 | Food-job-board employer extraction | Curation (time-sensitive) | Strongest single intent signal — restaurant is actively hiring a wine director right now | [02](strategies/02_food_job_boards.md) |
+| 13 | Sommelier credentialing pass lists | Curation | Named-person → employer mapping; almost zero overlap with awards | [03](strategies/03_somm_credentialing.md) |
+| 14 | Direct-to-consumer food marketplaces | Curation | Behavioral analog of Table22 subscribers; ~3-5K US universe | [04](strategies/04_d2c_marketplaces.md) |
+| 15 | Reservation-impossible permanent venues | Curation | Demand-saturation signal, distinct from #7 pop-up cohort | [05](strategies/05_reservation_impossible.md) |
+| 16 | Paywalled Substack food-writer lists | Curation | Newsletter-only; invisible to press archive deep-dive | [06](strategies/06_substack_food_writers.md) |
+| 17 | Cookbook author → restaurant mapping | Curation | ~few-hundred chef-author venues, almost all T1/T2 | [07](strategies/07_cookbook_author_restaurants.md) |
+| 18 | Specialty distributor customer logos (multi-vertical) | Curation | Multi-vertical equivalent of WineSearcher, mostly free | [08](strategies/08_specialty_distributor_logos.md) |
+
+**Selection logic.** v3 lookalike rides *brand-profile keyword* graphs over
+Google Maps; the Wave 1 list above rides *editorial signal* graphs (awards,
+press, Reddit). The Wave 2 channels add three new graph types:
+
+- **Person graphs** — #11 (IG follows + tags), #13 (credential rosters), #17 (cookbook author bios)
+- **Behavioral / intent graphs** — #12 (active hiring), #15 (reservation scarcity), #14 (D2C revenue commitment)
+- **Supply-chain graphs** — #18 (distributor customer lists)
+
+These are structurally orthogonal to v3 lookalike, so additions stack rather
+than overlap. Per-channel cost, volume, schema, and scrape recipe in the
+`strategies/` directory.
+
 ---
 
 ## Section 7 — Open questions

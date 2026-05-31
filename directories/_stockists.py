@@ -220,7 +220,9 @@ def _fetch_html_or_playwright(url: str, *, strategy: str) -> str:
         except Exception as e:
             print(f"  [stockist] playwright error for {url}: {e}", flush=True)
             return ""
-    return fetch_html(url)
+    # WAF-aware fetch: curl_cffi (TLS impersonation) -> plain requests -> Playwright
+    from directories._browser_fetch import fetch_html_with_fallback
+    return fetch_html_with_fallback(url)
 
 
 def _parse_html_list(html: str, css_selector: str) -> list[dict]:
@@ -265,6 +267,10 @@ def scrape_stockist_page(
     hint: str = "",
     model: str = _DEFAULT_MODEL,
     sleep_between: float = 1.0,
+    business_type_default: str = "wine_store",
+    source_prefix: str = "stockist",
+    distinction_label: str = "Stockist",
+    keep_categories: set[str] | None = None,
 ) -> pd.DataFrame:
     """
     Scrape one or more stockist URLs for a single importer; return canonical-schema rows.
@@ -278,8 +284,8 @@ def scrape_stockist_page(
                     "bar". When False, keeps everything (route restaurants through the
                     restaurant pipeline separately if desired — out of scope here).
     """
-    source = f"stockist_{importer_slug}"
-    distinction = f"Stockist: {importer_name}"
+    source = f"{source_prefix}_{importer_slug}"
+    distinction = f"{distinction_label}: {importer_name}"
     rows: list[dict] = []
 
     if strategy == "html" and not css_selector:
@@ -309,14 +315,27 @@ def scrape_stockist_page(
             parsed = _call_claude(text, hint=hint or f"This is the '{importer_name}' stockist/where-to-buy page.", model=model)
 
         for r in parsed:
-            if retailers_only and r.get("category") in {"restaurant", "bar"}:
+            cat = r.get("category", "unknown")
+            if retailers_only and cat in {"restaurant", "bar"}:
+                continue
+            if keep_categories is not None and cat not in keep_categories:
                 continue
             if r.get("country", "us") != "us":
                 continue
+            # Per-row business_type override: when a customer-list page mixes
+            # restaurants + retail, let the parsed `category` route the row.
+            if cat == "restaurant":
+                btype = "restaurant"
+            elif cat == "bar":
+                btype = "restaurant"
+            elif cat == "shop":
+                btype = business_type_default if business_type_default != "wine_store" else "wine_store"
+            else:
+                btype = business_type_default
             rows.append(make_row(
                 source=source,
                 tier=tier,
-                business_type="wine_store",
+                business_type=btype,
                 name=r["name"],
                 city=r.get("city", ""),
                 state=r.get("state", ""),

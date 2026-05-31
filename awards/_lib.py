@@ -185,7 +185,10 @@ def save_source(df: pd.DataFrame, slug: str, *, stamp: str | None = None) -> Pat
 
 
 def latest_for_slug(slug: str) -> Path | None:
-    files = sorted(OUTPUT_DIR.glob(f"{slug}_*.csv"))
+    # Use regex match on the date suffix so e.g. slug="michelin" doesn't
+    # accidentally pick up `michelin_grape_*.csv` (sibling slug).
+    pat = re.compile(rf"^{re.escape(slug)}_\d{{8}}\.csv$")
+    files = sorted(p for p in OUTPUT_DIR.glob(f"{slug}_*.csv") if pat.match(p.name))
     return files[-1] if files else None
 
 
@@ -235,12 +238,48 @@ def load_cookies_from_file(path: str) -> list[dict]:
 # -- HTTP fetch --------------------------------------------------------------
 
 def fetch_html(url: str, *, timeout: int = 30, retries: int = 3, sleep: float = 1.5) -> str:
-    """GET with UA + retries. Returns text or '' if exhausted."""
+    """GET with browser TLS impersonation (curl_cffi/chrome120) + retries.
+
+    Falls back to plain requests if curl_cffi raises. WAF-protected sites
+    (Cloudflare/Akamai) typically need the impersonation; plain origins
+    don't care either way. Returns text or '' if exhausted.
+    """
+    try:
+        from curl_cffi import requests as _cffi  # local import: optional dep
+    except ImportError:
+        _cffi = None
+
     last_exc: Exception | None = None
     for attempt in range(retries):
+        # Path 1: curl_cffi with chrome120 impersonation
+        if _cffi is not None:
+            try:
+                r = _cffi.get(
+                    url,
+                    impersonate="chrome120",
+                    timeout=timeout,
+                    allow_redirects=True,
+                )
+                if r.status_code == 200:
+                    return r.text
+                if r.status_code in (403, 429, 503):
+                    time.sleep(sleep * (attempt + 1))
+                    continue
+                # 404 with substantive body is often a WAF / SPA — keep it.
+                if r.status_code == 404 and len(r.text or "") > 1500:
+                    return r.text
+                print(f"  [http {r.status_code}] {url}", flush=True)
+                return ""
+            except Exception as e:
+                last_exc = e
+        # Path 2: plain requests fallback
         try:
-            r = requests.get(url, headers={"User-Agent": UA, "Accept-Language": "en-US,en"},
-                             timeout=timeout, allow_redirects=True)
+            r = requests.get(
+                url,
+                headers={"User-Agent": UA, "Accept-Language": "en-US,en"},
+                timeout=timeout,
+                allow_redirects=True,
+            )
             if r.status_code == 200:
                 return r.text
             if r.status_code in (403, 429, 503):
