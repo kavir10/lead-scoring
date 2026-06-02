@@ -147,3 +147,72 @@ To continue toward 5000, choose one:
 - Keep strict ICP and accept that the available US wine-store universe may be closer to 3k than 5k without including liquor stores, wineries, wine bars, or low/no-footprint rows.
 - Expand to lower-confidence wine retail candidates: allow missing websites, 10-19 review rows, some wine-and-beer hybrids, and rows needing human QA.
 - Spend more API calls on long-tail locations/directories, knowing the 3,000-search pass added only `226` net strict accepted rows after dedupe.
+
+## Continuation: Remaining Wine Searches
+
+Added `--skip-searches` to `scripts/fresh_wine_discovery.py` and ran the remaining query/location combinations after the first 3,000 tasks.
+
+Command:
+
+```bash
+.venv/bin/python scripts/fresh_wine_discovery.py --skip-searches 3000 --workers 30 --rps 20
+```
+
+Result:
+
+- Raw rows: `56,043`
+- Candidate rows before final builder: `1,882`
+- Candidate file: `output/fresh_wine_leads_20260602/fresh_wine_serper_candidates_1882_20260602_114513.csv`
+
+Strict merge with both fresh candidate files:
+
+- Final strict rows: `3,003`
+- This confirms the strict, deduped, wine-store-evidenced corpus is roughly 3k with the current sources/searches.
+
+## Expanded 5,000-Row Working List
+
+Added `--expanded` to `scripts/build_wine_leads.py`.
+
+Expanded mode ranks rows in three confidence bands:
+
+- `strict`: ICP-filtered wine-store evidence.
+- `expanded`: wine-retail evidence with a controlled caveat, such as low review count, missing website, hybrid wine shop/bar, or rating exception.
+- `prospecting_tail`: wine-query provenance but not verified enough to call ICP-clean; these rows are marked `qa_required=True`.
+
+Command:
+
+```bash
+.venv/bin/python scripts/build_wine_leads.py --expanded --limit 5000 --sources \
+  output/custom-serper-scoring_kavir_20260402_bakery-butcher-cheese-shop-deli-fish-market-specialty-grocer-wine-bar-wine-store_73915_all_clubs_v2.reclassified_20260422.csv \
+  output/fresh_icp_search_tiered_abcd_7761_20260601_033726.csv \
+  output/wine_directories_cleaned_20260515_dedup.csv \
+  output/best_wine_shops/best_wine_shops_20260525_dedup.csv \
+  output/1_wine_new_to_enrich.csv \
+  output/clubs_sales_ready_combined_20260422_cleaned.csv \
+  output/clubs_working_sales_list_20260422.csv \
+  output/3_scored_all_combined_final.csv \
+  output/fresh_wine_leads_20260602/fresh_wine_serper_candidates_1726_20260602_113512.csv \
+  output/fresh_wine_leads_20260602/fresh_wine_serper_candidates_1882_20260602_114513.csv
+```
+
+Result:
+
+- Final rows: `5,000`
+- Output: `output/fresh_wine_leads_20260602/wine_leads_top_5000.csv`
+- Accepted deduped rows available behind the top file: `10,010`
+- Final by mode:
+  - `strict`: `3,003`
+  - `expanded`: `611`
+  - `prospecting_tail`: `1,386`
+- Final with website: `4,342`
+- Final with email signup: `2,672`
+- Final with club signal: `648`
+- Final with Instagram: `2,134`
+- Median rating: `4.7`
+- Median review count: `99`
+
+QA note:
+
+- The 5,000-row file is a working prospecting list, not 5,000 ICP-clean wine shops.
+- `prospecting_tail` rows must be QA'd before sales use. Spot checks show some high-rated restaurants, wineries, and other wine-query false positives still appear in this tail.
+- For a sales-ready wine-store list, use `wine_list_mode in {"strict", "expanded"}` first; that yields `3,614` rows.

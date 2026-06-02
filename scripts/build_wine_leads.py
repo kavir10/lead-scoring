@@ -61,6 +61,22 @@ NON_WINE_TYPE_RE = re.compile(
     r"furniture store|jewelry store|art gallery|spa|salon)\b",
     re.I,
 )
+EXPANDED_NOISE_RE = re.compile(
+    r"\b(?:cvs|walgreens|rite aid|sunoco|sheetz|gas station|tobacco|"
+    r"smoke shop|vape|book store|greeting card shop|theatre|theater|"
+    r"country club|botanical garden|orchestra|hotel|resort|night club|"
+    r"sports bar|cigar shop|coffee shop|pizza restaurant)\b",
+    re.I,
+)
+PROSPECTING_TAIL_NOISE_RE = re.compile(
+    r"\b(?:cvs|walgreens|rite aid|sunoco|sheetz|gas station|tobacco|"
+    r"smoke shop|vape|book store|greeting card shop|theatre|theater|"
+    r"country club|botanical garden|orchestra|hotel|resort|night club|"
+    r"sports bar|cigar shop|coffee shop|pizza|restaurant|brewery|"
+    r"distillery|supermarket|department store|furniture|hardware|bridal|"
+    r"car wash|atm|tourist attraction|amusement|stadium|arena)\b",
+    re.I,
+)
 LIQUOR_HEAVY_RE = re.compile(
     r"\b(?:liquor|spirits|beer|beverage depot|tobacco|vape|smoke shop)\b",
     re.I,
@@ -281,6 +297,70 @@ def rejection_reason(row: pd.Series) -> str:
     return ""
 
 
+def expanded_recovery_reason(row: pd.Series) -> str:
+    reason = str(row.get("wine_reject_reason", ""))
+    if not reason or not has_core_wine_retail_evidence(row) or looks_like_chain(row.get("name")):
+        return ""
+
+    text = row_text(row)
+    google_type = str(row.get("google_type", ""))
+    primary_wine_type = re.search(
+        r"\b(?:wine store|wine cellar|wine club|wine wholesaler and importer|wine storage facility)\b",
+        google_type,
+        flags=re.I,
+    ) is not None
+    rating = number(row.get("rating"))
+    reviews = number(row.get("review_count"))
+
+    if reason == "review_floor" and rating >= 4.0 and reviews >= 5:
+        return "expanded_low_review_count"
+    if reason == "missing_website" and primary_wine_type and rating >= 4.0 and reviews >= 10:
+        return "expanded_missing_website"
+    if reason == "missing_location" and primary_wine_type and present(row.get("website")):
+        return "expanded_missing_location"
+    if reason == "rating_floor" and primary_wine_type and rating >= 3.4 and reviews >= 20:
+        return "expanded_rating_exception"
+    if reason == "not_wine_store" and primary_wine_type and rating >= 4.0 and reviews >= 20:
+        if EXPANDED_NOISE_RE.search(text):
+            return ""
+        return "expanded_hybrid_wine_retail"
+    if reason == "liquor_or_beer_heavy" and primary_wine_type and rating >= 4.0 and reviews >= 20:
+        if EXPANDED_NOISE_RE.search(text):
+            return ""
+        return "expanded_liquor_beer_hybrid"
+    if reason == "non_retail_venue" and primary_wine_type and present(row.get("website")):
+        if re.search(r"\b(?:theatre|theater|country club|botanical garden|orchestra|hotel|resort)\b", text, flags=re.I):
+            return ""
+        return "expanded_event_or_programming_flag"
+    return ""
+
+
+def prospecting_tail_reason(row: pd.Series) -> str:
+    reason = str(row.get("wine_reject_reason", ""))
+    if not reason or looks_like_chain(row.get("name")):
+        return ""
+    if reason in {"chain_or_big_box", "non_wine_business_type", "non_retail_venue", "commodity_brand_signal", "coming_soon"}:
+        return ""
+
+    text = row_text(row)
+    query = str(row.get("search_query", ""))
+    if PROSPECTING_TAIL_NOISE_RE.search(text):
+        return ""
+    if not re.search(r"\bwine\b", query, flags=re.I):
+        return ""
+    if not re.search(r"\b(?:wine store|wine shop|wine merchant|wine boutique|wine cellar|natural wine|fine wine|curated wine|independent wine|organic wine|biodynamic wine|sommelier wine|wine and cheese)\b", query, flags=re.I):
+        return ""
+
+    rating = number(row.get("rating"))
+    reviews = number(row.get("review_count"))
+    has_site = present(row.get("website"))
+    if rating >= 4.2 and reviews >= 20:
+        return "prospecting_tail_wine_query"
+    if has_site and rating >= 4.0 and reviews >= 10:
+        return "prospecting_tail_wine_query"
+    return ""
+
+
 def dedupe_key(row: pd.Series) -> str:
     phone = clean_phone(row.get("phone"))
     if len(phone) >= 10:
@@ -321,6 +401,18 @@ def score_row(row: pd.Series) -> float:
 
     if LIQUOR_HEAVY_RE.search(text):
         score -= 8.0
+    recovery_reason = str(row.get("expanded_recovery_reason", ""))
+    if recovery_reason:
+        score -= {
+            "expanded_low_review_count": 16.0,
+            "expanded_missing_website": 18.0,
+            "expanded_missing_location": 20.0,
+            "expanded_rating_exception": 20.0,
+            "expanded_hybrid_wine_retail": 12.0,
+            "expanded_liquor_beer_hybrid": 22.0,
+            "expanded_event_or_programming_flag": 18.0,
+            "prospecting_tail_wine_query": 34.0,
+        }.get(recovery_reason, 18.0)
     return round(score, 2)
 
 
@@ -334,11 +426,29 @@ def assign_band(score: float) -> str:
     return "D - Low Priority"
 
 
-def build_leads(candidates: pd.DataFrame, limit: int) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+def build_leads(candidates: pd.DataFrame, limit: int, expanded: bool = False) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     work = candidates.copy()
     work["wine_reject_reason"] = work.apply(rejection_reason, axis=1)
     rejected = work[work["wine_reject_reason"].ne("")].copy()
     accepted = work[work["wine_reject_reason"].eq("")].copy()
+    accepted["expanded_recovery_reason"] = ""
+    accepted["wine_list_mode"] = "strict"
+    accepted["qa_required"] = False
+
+    if expanded and not rejected.empty:
+        recovered = rejected.copy()
+        recovered["expanded_recovery_reason"] = recovered.apply(expanded_recovery_reason, axis=1)
+        recovered = recovered[recovered["expanded_recovery_reason"].ne("")].copy()
+        recovered["wine_list_mode"] = "expanded"
+        recovered["qa_required"] = True
+        recovered_indexes = set(recovered.index)
+        tail = rejected[~rejected.index.isin(recovered_indexes)].copy()
+        tail["expanded_recovery_reason"] = tail.apply(prospecting_tail_reason, axis=1)
+        tail = tail[tail["expanded_recovery_reason"].ne("")].copy()
+        tail["wine_list_mode"] = "prospecting_tail"
+        tail["qa_required"] = True
+        recovered = pd.concat([recovered, tail], ignore_index=True, sort=False)
+        accepted = pd.concat([accepted, recovered], ignore_index=True, sort=False)
 
     accepted["_dedupe_key"] = accepted.apply(dedupe_key, axis=1)
     accepted["wine_priority_score"] = accepted.apply(score_row, axis=1)
@@ -346,13 +456,18 @@ def build_leads(candidates: pd.DataFrame, limit: int) -> tuple[pd.DataFrame, pd.
     accepted["_prestige_rank"] = accepted.apply(is_prestige_row, axis=1).astype(int)
     accepted["_club_rank"] = accepted["has_club_final"].apply(truthy).astype(int)
     accepted["_reviews_rank"] = accepted["review_count"].apply(number)
+    accepted["_mode_rank"] = accepted["wine_list_mode"].map({"strict": 3, "expanded": 2, "prospecting_tail": 1}).fillna(0)
 
     accepted = (
         accepted.sort_values(
-            ["wine_priority_score", "_prestige_rank", "_club_rank", "_reviews_rank", "rating"],
-            ascending=[False, False, False, False, False],
+            ["_mode_rank", "wine_priority_score", "_prestige_rank", "_club_rank", "_reviews_rank", "rating"],
+            ascending=[False, False, False, False, False, False],
         )
         .drop_duplicates("_dedupe_key", keep="first")
+        .sort_values(
+            ["_mode_rank", "wine_priority_score", "_prestige_rank", "_club_rank", "_reviews_rank", "rating"],
+            ascending=[False, False, False, False, False, False],
+        )
         .reset_index(drop=True)
     )
     accepted.insert(0, "rank", range(1, len(accepted) + 1))
@@ -363,7 +478,8 @@ def write_outputs(final: pd.DataFrame, accepted: pd.DataFrame, rejected: pd.Data
     args.run_dir.mkdir(parents=True, exist_ok=True)
 
     final_cols = [
-        "rank", "name", "wine_icp_band", "wine_priority_score", "city", "state",
+        "rank", "name", "wine_icp_band", "wine_priority_score", "wine_list_mode",
+        "qa_required", "expanded_recovery_reason", "wine_reject_reason", "city", "state",
         "address", "phone", "website", "rating", "review_count",
         "has_club_final", "club_type_final", "club_url_final", "club_signals_final",
         "has_email_signup", "has_ecommerce", "instagram_url", "facebook_url",
@@ -395,6 +511,8 @@ def write_outputs(final: pd.DataFrame, accepted: pd.DataFrame, rejected: pd.Data
         "sources": [str(path) for path in args.sources],
         "final_by_band": final["wine_icp_band"].value_counts().to_dict() if not final.empty else {},
         "accepted_by_band": accepted["wine_icp_band"].value_counts().to_dict() if not accepted.empty else {},
+        "final_by_mode": final["wine_list_mode"].value_counts().to_dict() if "wine_list_mode" in final else {},
+        "final_recovery_reasons": final["expanded_recovery_reason"].replace("", "strict").value_counts().to_dict() if "expanded_recovery_reason" in final else {},
         "rejected_by_reason": rejected["wine_reject_reason"].value_counts().to_dict() if not rejected.empty else {},
         "final_with_website": int(final["website"].apply(present).sum()) if "website" in final else 0,
         "final_with_email_signup": int(final["has_email_signup"].apply(truthy).sum()) if "has_email_signup" in final else 0,
@@ -422,11 +540,12 @@ def main() -> None:
     parser.add_argument("--limit", type=int, default=5000)
     parser.add_argument("--run-dir", type=Path, default=DEFAULT_RUN_DIR)
     parser.add_argument("--qa-per-band", type=int, default=25)
+    parser.add_argument("--expanded", action="store_true", help="Append lower-confidence wine-retail rows with QA flags.")
     parser.add_argument("--sources", type=Path, nargs="*", default=DEFAULT_SOURCES)
     args = parser.parse_args()
 
     candidates = load_candidates(args.sources)
-    final, accepted, rejected = build_leads(candidates, args.limit)
+    final, accepted, rejected = build_leads(candidates, args.limit, expanded=args.expanded)
     write_outputs(final, accepted, rejected, args)
 
 

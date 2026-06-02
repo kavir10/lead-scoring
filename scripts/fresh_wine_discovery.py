@@ -179,10 +179,12 @@ def search(task: SearchTask, api_key: str, rps: int) -> list[dict]:
     return []
 
 
-def build_tasks(max_cities: int, max_queries: int, max_searches: int) -> list[SearchTask]:
+def build_tasks(max_cities: int, max_queries: int, max_searches: int, skip_searches: int) -> list[SearchTask]:
     cities = CITIES[:max_cities] if max_cities else CITIES
     queries = WINE_QUERIES[:max_queries] if max_queries else WINE_QUERIES
     tasks = [SearchTask(query, weight, city) for query, weight in queries for city in cities]
+    if skip_searches:
+        tasks = tasks[skip_searches:]
     return tasks[:max_searches] if max_searches else tasks
 
 
@@ -192,8 +194,10 @@ def discover(args: argparse.Namespace) -> tuple[pd.DataFrame, pd.DataFrame]:
     if not api_key:
         raise SystemExit("SERPER_API_KEY is not set")
 
-    tasks = build_tasks(args.max_cities, args.max_queries, args.max_searches)
+    tasks = build_tasks(args.max_cities, args.max_queries, args.max_searches, args.skip_searches)
     print(f"Fresh wine searches: {len(tasks):,}")
+    if args.skip_searches:
+        print(f"Skipped first searches: {args.skip_searches:,}")
     print(f"Locations: {args.max_cities or len(CITIES):,}; queries: {args.max_queries or len(WINE_QUERIES):,}")
 
     all_rows: list[dict] = []
@@ -241,7 +245,8 @@ def write_outputs(raw: pd.DataFrame, candidates: pd.DataFrame, args: argparse.Na
         "candidate_rows": int(len(candidates)),
         "raw_path": str(raw_path),
         "candidates_path": str(candidates_path),
-        "searches": int(args.max_searches) if args.max_searches else int((args.max_cities or len(CITIES)) * (args.max_queries or len(WINE_QUERIES))),
+        "skipped_searches": int(args.skip_searches),
+        "searches": int(len(raw.groupby(["search_query", "search_city"], dropna=False))),
         "candidate_google_types": candidates["google_type"].fillna("").astype(str).value_counts().head(25).to_dict(),
     }
     summary_path.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
@@ -254,6 +259,7 @@ def main() -> None:
     parser.add_argument("--max-cities", type=int, default=0)
     parser.add_argument("--max-queries", type=int, default=0)
     parser.add_argument("--max-searches", type=int, default=0)
+    parser.add_argument("--skip-searches", type=int, default=0)
     parser.add_argument("--workers", type=int, default=30)
     parser.add_argument("--rps", type=int, default=20)
     args = parser.parse_args()
