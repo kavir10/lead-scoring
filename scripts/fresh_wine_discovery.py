@@ -75,6 +75,32 @@ class SearchTask:
     location: str
 
 
+def load_locations(locations_file: Path | None, max_cities: int) -> list[str]:
+    if not locations_file:
+        return CITIES[:max_cities] if max_cities else CITIES
+
+    df = pd.read_csv(locations_file, low_memory=False)
+    required = {"city", "state"}
+    if not required.issubset(df.columns):
+        raise SystemExit(f"{locations_file} must include columns: city,state")
+
+    locations: list[str] = []
+    seen: set[str] = set()
+    for _, row in df.iterrows():
+        city = clean_text(row.get("city"))
+        state = clean_text(row.get("state"))
+        neighborhood = clean_text(row.get("neighborhood")) if "neighborhood" in df.columns else ""
+        if not city or not state:
+            continue
+        location = f"{neighborhood}, {city}, {state}" if neighborhood else f"{city}, {state}"
+        key = location.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        locations.append(location)
+    return locations[:max_cities] if max_cities else locations
+
+
 def rate_limit(rps: int) -> None:
     with _rate_lock:
         now = time.monotonic()
@@ -179,10 +205,9 @@ def search(task: SearchTask, api_key: str, rps: int) -> list[dict]:
     return []
 
 
-def build_tasks(max_cities: int, max_queries: int, max_searches: int, skip_searches: int) -> list[SearchTask]:
-    cities = CITIES[:max_cities] if max_cities else CITIES
+def build_tasks(locations: list[str], max_queries: int, max_searches: int, skip_searches: int) -> list[SearchTask]:
     queries = WINE_QUERIES[:max_queries] if max_queries else WINE_QUERIES
-    tasks = [SearchTask(query, weight, city) for query, weight in queries for city in cities]
+    tasks = [SearchTask(query, weight, location) for query, weight in queries for location in locations]
     if skip_searches:
         tasks = tasks[skip_searches:]
     return tasks[:max_searches] if max_searches else tasks
@@ -194,11 +219,12 @@ def discover(args: argparse.Namespace) -> tuple[pd.DataFrame, pd.DataFrame]:
     if not api_key:
         raise SystemExit("SERPER_API_KEY is not set")
 
-    tasks = build_tasks(args.max_cities, args.max_queries, args.max_searches, args.skip_searches)
+    locations = load_locations(args.locations_file, args.max_cities)
+    tasks = build_tasks(locations, args.max_queries, args.max_searches, args.skip_searches)
     print(f"Fresh wine searches: {len(tasks):,}")
     if args.skip_searches:
         print(f"Skipped first searches: {args.skip_searches:,}")
-    print(f"Locations: {args.max_cities or len(CITIES):,}; queries: {args.max_queries or len(WINE_QUERIES):,}")
+    print(f"Locations: {len(locations):,}; queries: {args.max_queries or len(WINE_QUERIES):,}")
 
     all_rows: list[dict] = []
     started = time.monotonic()
@@ -247,6 +273,7 @@ def write_outputs(raw: pd.DataFrame, candidates: pd.DataFrame, args: argparse.Na
         "candidates_path": str(candidates_path),
         "skipped_searches": int(args.skip_searches),
         "searches": int(len(raw.groupby(["search_query", "search_city"], dropna=False))),
+        "locations_file": str(args.locations_file) if args.locations_file else "",
         "candidate_google_types": candidates["google_type"].fillna("").astype(str).value_counts().head(25).to_dict(),
     }
     summary_path.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
@@ -256,6 +283,7 @@ def write_outputs(raw: pd.DataFrame, candidates: pd.DataFrame, args: argparse.Na
 def main() -> None:
     parser = argparse.ArgumentParser(description="Fresh wine-store discovery via Serper Maps.")
     parser.add_argument("--run-dir", type=Path, default=RUN_DIR)
+    parser.add_argument("--locations-file", type=Path)
     parser.add_argument("--max-cities", type=int, default=0)
     parser.add_argument("--max-queries", type=int, default=0)
     parser.add_argument("--max-searches", type=int, default=0)

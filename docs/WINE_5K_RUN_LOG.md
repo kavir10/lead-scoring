@@ -216,3 +216,54 @@ QA note:
 - The 5,000-row file is a working prospecting list, not 5,000 ICP-clean wine shops.
 - `prospecting_tail` rows must be QA'd before sales use. Spot checks show some high-rated restaurants, wineries, and other wine-query false positives still appear in this tail.
 - For a sales-ready wine-store list, use `wine_list_mode in {"strict", "expanded"}` first; that yields `3,614` rows.
+
+## Continuation: Neighborhood-Level Discovery
+
+Added `--locations-file` to `scripts/fresh_wine_discovery.py` so searches can target neighborhood-level locations from the committed trendy-neighborhood research files instead of only city-level locations. This helps avoid the Serper Maps top-20 cap burying neighborhood wine shops in large cities.
+
+Top-100/tiered neighborhood pass:
+
+```bash
+.venv/bin/python scripts/fresh_wine_discovery.py \
+  --locations-file research/trendy_neighborhoods/trendy_neighborhoods_top100_us_tiered_20260531.csv \
+  --max-queries 6 --max-searches 2500 --workers 30 --rps 20
+```
+
+- Raw rows: `48,145`
+- Candidate rows: `1,377`
+- Candidate file: `output/fresh_wine_leads_20260602/fresh_wine_serper_candidates_1377_20260602_120130.csv`
+
+Remaining top-100/tiered neighborhood pass:
+
+```bash
+.venv/bin/python scripts/fresh_wine_discovery.py \
+  --locations-file research/trendy_neighborhoods/trendy_neighborhoods_top100_us_tiered_20260531.csv \
+  --max-queries 6 --skip-searches 2500 --workers 30 --rps 20
+```
+
+- Raw rows: `20,394`
+- Candidate rows: `917`
+- Candidate file: `output/fresh_wine_leads_20260602/fresh_wine_serper_candidates_917_20260602_120426.csv`
+
+Uncovered-city neighborhood pass:
+
+- Candidate file: `output/fresh_wine_leads_20260602/fresh_wine_serper_candidates_1741_20260602_122541.csv`
+
+Latest rebuild with all sources:
+
+- Output: `output/fresh_wine_leads_20260602/wine_leads_top_5000.csv`
+- Final rows: `5,000`
+- Accepted deduped rows behind the top file: `10,561`
+- Final by mode:
+  - `strict`: `3,209`
+  - `expanded`: `903`
+  - `prospecting_tail`: `888`
+- Strict + expanded rows: `4,112`
+- Final with website: `4,224`
+- Final with email signup: `2,198`
+- Final with club signal: `524`
+- Final with Instagram: `1,740`
+- Median rating: `4.7`
+- Median review count: `86`
+
+The neighborhood passes replaced more of the noisy prospecting tail with stronger wine-store candidates, but the list still has `888` lower-confidence rows marked `qa_required=True`.
