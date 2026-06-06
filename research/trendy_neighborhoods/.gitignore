@@ -1,0 +1,4 @@
+# Partner-level files contain PII (names + street addresses pulled from BigQuery).
+# Keep the neighborhood lists + README committable; keep partner data out of git.
+active_partners_*.csv
+partners_trendy_neighborhood_*.csv
