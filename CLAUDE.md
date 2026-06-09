@@ -31,6 +31,16 @@ prefix scripts with `unset ANTHROPIC_API_KEY &&` — `load_dotenv()` will not
 override an existing empty var. Same applies to any script importing the
 `anthropic` SDK.
 
+## Web UI — `webui/`
+
+`python -m webui` serves a localhost-only browser UI (default
+`http://127.0.0.1:8722`) for the generic Serper pipeline. It is a thin
+wrapper: runs are spawned as `python main.py ...` subprocesses, so UI runs
+and CLI runs behave identically. FastAPI backend in `webui/server.py`,
+no-build vanilla JS frontend in `webui/static/`. Run state + logs persist
+under `output/webui_runs/<run_id>/`. The server binds `127.0.0.1` on
+purpose — never make it externally reachable.
+
 ## Pipelines
 
 ### Generic Serper pipeline — `main.py`
@@ -40,7 +50,7 @@ Three phases, orchestrated end-to-end or piecewise:
 ```bash
 python main.py                                              # full pipeline
 python main.py --discover                                   # phase 1 only
-python main.py --discover --types butcher,wine_store
+python main.py --discover --types butcher,wine     # canonical types = values of BUSINESS_TYPE_MAP
 python main.py --discover --max-searches 50
 python main.py --discover --merge output/1_discovered.csv   # union with existing
 python main.py --enrich output/1_discovered.csv             # phase 2 only
@@ -49,7 +59,7 @@ python main.py --enrich-remaining output/2_enriched_reviews.csv  # reels+posts+a
 python main.py --score output/2_enriched_availability.csv   # phase 3 only
 ```
 
-**Phase 1 — Discovery (`discover.py`).** Serper Maps across ~130 US cities,
+**Phase 1 — Discovery (`discover.py`).** Serper Maps across ~385 US cities,
 keyword queries per business type. Dedupes by phone, filters chains via
 `CHAIN_KEYWORDS` in `config.py`, applies quality floors (restaurants: ≥50
 reviews / ≥4.2 rating; niche: ≥20 / ≥4.0), requires a website.
@@ -188,19 +198,26 @@ Uses Apify for IG fetching and Claude (`claude-haiku-4-5-20251001`) for
 caption/OCR extraction. Outputs are gitignored (`raw_posts_*.json`,
 `candidates_*.json`, `images/`).
 
-## Postprocessing helpers
+## Postprocessing helpers — `postprocess/`
 
 Each is a standalone script that takes a CSV in and produces a CSV out —
-none modify the input.
+none modify the input. Run from the repo root as
+`python postprocess/<script>.py ...` (each script puts the repo root on
+`sys.path` so `config`/`discover` imports resolve).
 
-- **`detect_clubs.py` / `detect_clubs_v2.py`** — concurrent website scraping (default 50 threads) to flag businesses with an existing club/subscription program. Adds `has_club`, `club_type`, `club_url`, `club_signals`. Supports `--resume` to continue from a partial output.
-- **`reclassify.py`** — re-buckets leads using Google Maps `type` (`output/type_lookup.csv`) + name/page_title heuristics into `partner_type` (fine: destination_restaurant, neighbourhood_restaurant, butcher, wine, cheese, bakery, fish, deli, specialty_grocer, books, farm) and `business_type_v2` (coarse: restaurants | wine | retail | other). Includes a "wine bar claw-back" pass.
-- **`reclassify_clubs.py`** — same idea, scoped to flagged club rows.
-- **`backfill_type.py` / `backfill_type_clubs.py`** — fill `business_type` on older CSVs that predate the canonical schema.
-- **`clean_directories.py` / `clean_awards.py` / `clean_clubs_sales_ready.py`** — schema normalization, dedupe, and last-mile cleanup before handoff.
-- **`dedupe_existing.py`** — phone-first, then name+address dedupe on any CSV.
-- **`sample_clubs_for_qa.py` / `sample_clubs_for_sales.py`** — sample N rows for review or sales handoff.
-- **`apply_edge_case_verdicts.py`** — fold manual QA verdicts back into a CSV.
+- **`postprocess/detect_clubs.py` / `detect_clubs_v2.py`** — concurrent website scraping (default 50 threads) to flag businesses with an existing club/subscription program. Adds `has_club`, `club_type`, `club_url`, `club_signals`. Supports `--resume` to continue from a partial output.
+- **`postprocess/reclassify.py`** — re-buckets leads using Google Maps `type` (`output/type_lookup.csv`) + name/page_title heuristics into `partner_type` (fine: destination_restaurant, neighbourhood_restaurant, butcher, wine, cheese, bakery, fish, deli, specialty_grocer, books, farm) and `business_type_v2` (coarse: restaurants | wine | retail | other). Includes a "wine bar claw-back" pass.
+- **`postprocess/reclassify_clubs.py`** — same idea, scoped to flagged club rows.
+- **`postprocess/backfill_type.py` / `backfill_type_clubs.py`** — fill `business_type` on older CSVs that predate the canonical schema.
+- **`postprocess/clean_directories.py` / `clean_awards.py` / `clean_clubs_sales_ready.py`** — schema normalization, dedupe, and last-mile cleanup before handoff.
+- **`postprocess/dedupe_existing.py`** — phone-first, then name+address dedupe on any CSV.
+- **`postprocess/sample_clubs_for_qa.py` / `sample_clubs_for_sales.py`** — sample N rows for review or sales handoff.
+- **`postprocess/apply_edge_case_verdicts.py`** — fold manual QA verdicts back into a CSV.
+
+`scripts/` holds one-off run scripts from past lead-gen waves (fresh
+discovery sweeps, recovery jobs, wave merges). They follow the same
+`ROOT`-on-`sys.path` pattern and are kept for reference/re-runs, not as
+maintained pipelines.
 
 ## `config.py`
 
@@ -209,7 +226,7 @@ Single central config (~1200 lines):
 - API keys via `python-dotenv`
 - Apify actor IDs
 - Search queries by business type
-- City list (~130 cities)
+- City list (~385 cities)
 - `SCORING_WEIGHTS` (SHAP-aligned — see design notes)
 - `CHAIN_KEYWORDS` + liquor-license filter keywords (aggressive on purpose)
 - Press domains, reservation platform rankings
