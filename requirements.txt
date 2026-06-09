@@ -9,3 +9,5 @@ python-whois
 playwright
 anthropic
 curl_cffi
+fastapi
+uvicorn
