@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import argparse
 import re
+import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
@@ -43,8 +44,12 @@ from urllib.parse import urlparse
 import pandas as pd
 import requests
 
-from config import CHAIN_KEYWORDS, LIQUOR_KEYWORDS
-from discover import search_serper_maps, parse_town_state
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from config import CHAIN_KEYWORDS, LIQUOR_KEYWORDS  # noqa: E402
+from discover import search_serper_maps, parse_town_state  # noqa: E402
 
 
 # Word-boundary chain match. Avoids false positives like "Geraldine's" matching
