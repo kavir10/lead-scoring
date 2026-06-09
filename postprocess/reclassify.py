@@ -20,9 +20,15 @@ Source CSVs are never overwritten. Outputs:
 import os
 import re
 import sys
+from pathlib import Path
+
 import pandas as pd
 
-from config import (
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from config import (  # noqa: E402
     TYPE_TO_PARTNER_TYPE,
     PARTNER_TO_BUSINESS_TYPE,
     NAME_HEURISTIC_RULES,

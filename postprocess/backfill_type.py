@@ -18,10 +18,17 @@ import argparse
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+import sys
+from pathlib import Path
+
 import requests
 import pandas as pd
 
-from config import SERPER_API_KEY
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from config import SERPER_API_KEY  # noqa: E402
 
 
 TOP_FILES = [

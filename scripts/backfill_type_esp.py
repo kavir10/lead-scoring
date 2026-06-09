@@ -20,7 +20,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import pandas as pd
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, _ROOT)
+sys.path.insert(0, os.path.join(_ROOT, "postprocess"))
 from backfill_type import fetch_type, MAX_WORKERS  # noqa: E402
 
 ESP_FILE = "output/newsletter_merchants/newsletter_signal_clean_20260531.csv"
