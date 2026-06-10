@@ -39,6 +39,11 @@ ALL_SOURCES: list[tuple[str, str, int, str, str, bool]] = [
     ("sold_out_demand",      "demand",     1, "signals.sold_out_demand",      "mixed", False),
     ("seasonal_preorder",    "demand",     2, "signals.seasonal_preorder",    "mixed", False),
 
+    # Positioning leads — brand/ops posture that fits Table22 (wave 2)
+    ("marketplace_avoidance", "positioning", 2, "signals.marketplace_avoidance", "mixed", False),
+    ("restaurant_retail_arm", "positioning", 1, "signals.restaurant_retail_arm", "mixed", False),
+    ("gift_commerce",         "positioning", 2, "signals.gift_commerce",         "mixed", False),
+
     # Momentum / community leads — LLM-backed, best-effort
     ("press_momentum",       "press",      1, "signals.press_momentum",       "mixed", False),
     ("reddit_demand",        "community",  2, "signals.reddit_demand",        "mixed", False),

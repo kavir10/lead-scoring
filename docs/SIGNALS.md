@@ -36,7 +36,19 @@ Selection criteria for which of the 52 ideas to build first:
 | `sold_out_demand` | demand | Serper phrases | 3 | "More demand than they can serve" is the model's #1 cross-vertical theme; sold-out language is the cleanest public version of it. |
 | `seasonal_preorder` | demand | Serper phrases | 22 | Holiday roasts/turkeys/pies/panettone preorders prove prepaid-packaging muscle. Run 60–90 days before each seasonal window. |
 | `press_momentum` | press | Serper News + Claude | 8, 38 | Fresh press (≤30 days) creates a demand spike → operational pressure → buying urgency. The `awards/` pipeline covers evergreen lists; this covers *recency*. |
-| `reddit_demand` | community | Reddit JSON + Claude | 43, 44, 16 | Customer language ("always sells out", "worth the drive") catches small-market local dominance that raw metrics miss — and doubles as outbound copy. |
+| `reddit_demand` | community | Reddit JSON + Claude | 43, 44, 16 | Customer language ("always sells out", "worth the drive") catches small-market local dominance that review/follower counts miss — and doubles as outbound copy. |
+| `marketplace_avoidance` | positioning | Serper phrases | 35 | "No DoorDash / order direct / pickup only" = margin- and brand-protective owners; matches Table22's not-a-marketplace positioning and reverses the fee-fatigue objection. |
+| `restaurant_retail_arm` | positioning | Serper phrases | 41, 42 | Restaurants already selling pasta kits / butcher boxes / pantry lines — the bridge from reservations to recurring commerce; retail-arm hybrids are in-ICP. |
+| `gift_commerce` | positioning | Serper phrases | 21, 46 | Gift-box / corporate-gifting language converts naturally to prepaid bundles and 3–6 month gift subscriptions. |
+
+### Companion postprocess filters (wave 2)
+
+These mine lists you *already have* rather than searching the open web:
+
+| Script | Idea # | What it does |
+|---|---|---|
+| `postprocess/latent_monetization.py` | 9, 20 | One pass over an enriched CSV → two lists: **tech_ready_no_subscription** (email/reservations/ecommerce present, no club) and **email_list_no_monetization** (owns an audience, no repeat-commerce product). Join club status from a `detect_clubs` output via `--clubs`. |
+| `postprocess/broken_commerce.py` | 33 | Probes each lead's linked /shop /club /order /preorder paths (plus `club_url`) for dead or "coming soon" pages. A broken club page = prior intent + operational failure — warmer than no page. |
 
 ## How the phrase lanes work
 
@@ -95,6 +107,40 @@ required for `press_momentum` and `reddit_demand`.
 3. Optionally push the net-new file through the generic pipeline
    (`python main.py --enrich ...`) to score them — the trigger columns ride
    along untouched.
+
+## Idea coverage tracker (the 52-idea backlog)
+
+Status of every idea in `docs/INNOVATIVE_LEAD_LIST_BUILDING_IDEAS.md`.
+**built** = a runnable lane/script exists for it · **partial** = an existing
+pipeline covers part of the motion · **open** = not started.
+
+| Status | Ideas | Where |
+|---|---|---|
+| built | 1, 18 | `signals/club_transition` |
+| built | 2 | `signals/manual_preorder` |
+| built | 3 | `signals/sold_out_demand` |
+| built | 8, 38 | `signals/press_momentum` (recent) + `awards/` (evergreen) |
+| built | 9, 20 | `postprocess/latent_monetization.py` |
+| built | 16, 43, 44 | `signals/reddit_demand` |
+| built | 21, 46 | `signals/gift_commerce` |
+| built | 22 | `signals/seasonal_preorder` |
+| built | 25 | `jobs/` (Culinary Agents, Poached, Indeed, SevenRooms…) |
+| built | 33 | `postprocess/broken_commerce.py` |
+| built | 35 | `signals/marketplace_avoidance` |
+| built | 41, 42 | `signals/restaurant_retail_arm` |
+| built | 52 | `signals/former_club_recovery` |
+| partial | 6 | butcher vertical (`discover_butchers.py`, ICP search vocabulary) |
+| partial | 7 | `best_wine_shops/` + wine lead scripts (street-cred half open) |
+| partial | 10 | `signals/reddit_demand` surfaces some; no dedicated small-market lane |
+| partial | 11, 28 | `social_graph/` (seed-post fetch + venue aggregation) |
+| partial | 17 | `scarcity/reservation_impossible.py` (availability probing; no social mining) |
+| partial | 29 | `directories/` importer/distributor stockist modules |
+| partial | 30 | `directories/raisin_app` |
+| partial | 45 | `research/trendy_neighborhoods` |
+| open | 4, 5, 12, 13, 14, 15, 19, 23, 24, 26, 27, 31, 32, 34, 36, 37, 39, 40, 47, 48, 49, 50, 51 | — |
+
+Tally: **20 built, 9 partial, 23 open** (some lanes cover multiple ideas;
+some ideas span multiple lanes). Keep this table current when adding lanes.
 
 ## Deferred (and why)
 
