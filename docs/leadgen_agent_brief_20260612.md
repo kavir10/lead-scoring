@@ -77,9 +77,11 @@ wine bars (unless explicit retail-shop hybrid — say so in evidence).
 
 ## Method notes
 
-- WebSearch works well. WebFetch works on many editorial sites but some 403 (Yelp,
-  Michelin, VinePair) — when a fetch 403s, get names from the search-result snippets or
-  find a secondary article covering the same list.
+- WebSearch works well. **WebFetch is fully blocked in this environment (403 on
+  everything)** — do not waste calls on it. Harvest names from WebSearch result content:
+  run several query variations per target list (e.g. `"<list name>" full list`,
+  `site-name <city> best <vertical>` , `"<business>" <city>` follow-ups) to pull more
+  entries out of snippets.
 - High-yield patterns: city "best of" listicles (Eater, Infatuation, local press),
   award lists (James Beard semifinalists by year, Good Food Awards winners), club/share
   language searches (`"wine club" shop <city>`, `"meat CSA" butcher <state>`,
