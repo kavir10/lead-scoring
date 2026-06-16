@@ -50,15 +50,39 @@ be fed through `main.py --enrich` for full enrichment + scoring.
 club-language searches. Targets: 250–300 rows each. Results: see counts below as
 iterations complete.
 
-## Status
+### Wave 3 — 2026-06-16 (after spend-limit lifted)
 
-| Vertical | Deduped leads | Target |
-|---|---:|---:|
-| restaurants | wave 1 in flight | 1000 |
-| butchers | wave 1 in flight | 1000 |
-| cheese | wave 1 in flight | 1000 |
-| bakeries | wave 1 in flight | 1000 |
-| wine | wave 1 in flight | 1000 |
+Spend limit (which killed wave 2 mid-run on 06-12) cleared. Re-ran 5 discovery
+agents on fresh lanes: complete state sweeps, affluent suburbs, destination small
+towns, cuisine-fit roundups, club/share/CSA bullseyes, butcher Tier-2 + farm-retail.
+
+**Sub-agent swarm + harvest.** The restaurant wave-3 agent spawned ~9 regional
+sub-agents that returned qualified rows **as text** instead of writing the CSV, and
+SendMessage isn't available in this harness to resume them. Built
+`scripts/harvest_subagent_rows.py` to recover well-formed schema rows directly from
+sub-agent JSONL transcripts (HTML-unescaped, schema-validated, deduped) → per-vertical
+`harvested_subagents_<stamp>.csv`, folded in by the normal merge. This recovered
+~400 restaurant rows that would otherwise have been lost.
+
+**Domain backfill.** Leads from listicles lacked websites. `apply_domain_backfill.py`
+fills the `website` field from a per-business search-resolved mapping
+(`output/innovative_leads/domains/<vertical>_*.csv`); mappings are re-applied after every
+merge (merge rebuilds masters from wave files, so backfill must be re-run). First batch:
+110 restaurant domains.
+
+## Status (2026-06-16)
+
+| Vertical | Deduped leads | Target | % |
+|---|---:|---:|---:|
+| restaurants | 854 | 1000 | 85% |
+| wine | 422 | 1000 | 42% |
+| bakeries | 391 | 1000 | 39% |
+| cheese | 359 | 1000 | 36% |
+| butchers | 349 | 1000 | 35% |
+| **total** | **2375** | **5000** | **48%** |
+
+Domain coverage backfill is a separate pass run against the final masters once
+discovery hits target (restaurants partially done: 110+).
 
 Note: ICP.md says the premium independent butcher universe is ~1,000–1,200 shops total;
 hitting 1,000 *qualified* butchers may require including Tier-2 premium independents and
