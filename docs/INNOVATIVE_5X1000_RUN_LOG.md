@@ -70,19 +70,51 @@ fills the `website` field from a per-business search-resolved mapping
 merge (merge rebuilds masters from wave files, so backfill must be re-run). First batch:
 110 restaurant domains.
 
-## Status (2026-06-16)
+### Waves 3–4 — 2026-06-16 (swarm expansion)
 
-| Vertical | Deduped leads | Target | % |
-|---|---:|---:|---:|
-| restaurants | 854 | 1000 | 85% |
-| wine | 422 | 1000 | 42% |
-| bakeries | 391 | 1000 | 39% |
-| cheese | 359 | 1000 | 36% |
-| butchers | 349 | 1000 | 35% |
-| **total** | **2375** | **5000** | **48%** |
+After spend-limit cleared, the restaurant / butcher / cheese / wine wave agents each
+spawned 5–9 regional sub-agents (national award lanes, full state sweeps, affluent
+suburbs, destination towns, club/share/CSA bullseyes). All recovered via the transcript
+harvest (`harvest_subagent_rows.py`). Restaurants cleared 1,000 and were stood down;
+remaining capacity focused on the four laggards.
 
-Domain coverage backfill is a separate pass run against the final masters once
-discovery hits target (restaurants partially done: 110+).
+**Composition note (read with the counts).** To approach 1,000 on butcher and cheese —
+verticals whose premium-independent universe ICP.md pegs at only ~1,000–1,200 (butcher)
+and similar (cheese) — the lists deliberately include Tier-2 independents, **farm-retail /
+meat-CSA hybrids** (flagged "farm retail/share" in evidence), regional sausage makers,
+farmstead creameries with retail, and Italian-deli mozzarella counters. These are real
+ICP-adjacent leads but skew below the Beast-and-Cleaver / cut-to-order-monger bullseye.
+A tiering/QA pass is recommended before sales hand-off (see next steps).
+
+### Blocker — session limit (2026-06-16 ~15:30 UTC)
+
+Hit "session limit · resets 7:40pm UTC" mid-run. This caps agent spawning, so the
+remaining wine (national club lane), bakery (wave-3 deep), and cheese (Texas+club lane)
+sub-agents were killed before writing. Harvest/merge/commit (local) still work, so all
+completed batches are captured and pushed. The loop is scheduled to resume after the
+reset.
+
+## Status (2026-06-16, at session-limit checkpoint)
+
+| Vertical | Deduped leads | w/ website | Target | % to target |
+|---|---:|---:|---:|---:|
+| restaurants | 1113 | 110 (9%) | 1000 | **✓ 111%** |
+| wine | 792 | 325 (41%) | 1000 | 79% |
+| bakeries | 757 | 285 (37%) | 1000 | 76% |
+| butchers | 717 | 348 (48%) | 1000 | 72% |
+| cheese | 660 | 299 (45%) | 1000 | 66% |
+| **total** | **4039** | **1367** | **5000** | **81%** |
+
+### Next steps (on session-limit reset)
+
+1. Resume discovery for the 4 laggards (~1,030 net-new still needed): re-run the killed
+   lanes (wine national clubs, bakery deep state sweep, cheese TX+club) plus new lanes
+   (do-you-ship comment mining, hidden-club detection, press-without-infrastructure,
+   gift-ready, link-in-bio chaos) and finer state/suburb sweeps.
+2. Domain-backfill sweep across **all** final masters (restaurants only 9% — the listicle
+   agents left websites blank; the per-business search lookup proven in
+   `apply_domain_backfill.py` fills these).
+3. Tiering/QA pass on butcher + cheese to separate bullseye from farm-share/Tier-2.
 
 Note: ICP.md says the premium independent butcher universe is ~1,000–1,200 shops total;
 hitting 1,000 *qualified* butchers may require including Tier-2 premium independents and
