@@ -2,7 +2,7 @@
 
 **Drafted:** 2026-05-19
 **Author:** Kavir
-**Companion code:** [`tam_calc.py`](../tam_calc.py) (TAM build) · [`lead-discovery-plan.html`](../lead-discovery-plan.html) (visual plan)
+**Companion code:** [`tam_calc.py`](../tam_calc.py) (TAM build) · [`lead-discovery-plan.html`](./lead-discovery-plan.html) (visual plan)
 
 ---
 
@@ -300,5 +300,5 @@ than overlap. Per-channel cost, volume, schema, and scrape recipe in the
 
 - TAM build script: [`tam_calc.py`](../tam_calc.py) — reproducible top-down + bottom-up + triangulation
 - Partner data input: `Past and Existing Partners - Monthly Website Visits - T22_final_list-Default-view-export-1770858132947 (1).csv` (593 rows, 591 with AGMV)
-- Visual plan: [`lead-discovery-plan.html`](../lead-discovery-plan.html)
+- Visual plan: [`lead-discovery-plan.html`](./lead-discovery-plan.html)
 - Adjacent project: `lookalike-icps/lookalike_v3/` (Kavir's lookalike pipeline)
