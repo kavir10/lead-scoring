@@ -1164,6 +1164,7 @@ def enrich_booking_availability(df: pd.DataFrame) -> pd.DataFrame:
                 return idx, None
             venue_slug = slug_match.group(1)
             total_slots = 0
+            any_success = False
             for date in check_dates:
                 try:
                     resp = requests.get(
@@ -1181,6 +1182,7 @@ def enrich_booking_availability(df: pd.DataFrame) -> pd.DataFrame:
                         timeout=10,
                     )
                     if resp.ok:
+                        any_success = True
                         data = resp.json()
                         slots = data.get("results", {}).get("venues", [])
                         for venue in slots:
@@ -1188,6 +1190,11 @@ def enrich_booking_availability(df: pd.DataFrame) -> pd.DataFrame:
                             total_slots += len(slot_list)
                 except Exception:
                     pass
+            # Only score venues we actually checked. Broken auth, API
+            # changes, bad slugs, or outages previously produced [0] -
+            # "fully booked" - rewarding failures with the scarcity signal.
+            if not any_success:
+                return idx, None
             return idx, [total_slots / len(check_dates)] if total_slots else [0]
 
         with ThreadPoolExecutor(max_workers=30) as executor:
