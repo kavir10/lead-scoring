@@ -223,14 +223,25 @@ def compute_lead_score(row: pd.Series) -> float:
 
         score += fn(val) * w[weight_key]
 
-    # Boolean signals
-    score += (1.0 if row.get("has_email_signup") else 0.0) * w["has_email_signup"]
-    score += (1.0 if row.get("has_ecommerce") else 0.0) * w["has_ecommerce"]
+    # Boolean signals. Enrichment round-trips through CSV, so these arrive as
+    # the STRINGS "True"/"False" - and "False" is truthy. Parse explicitly;
+    # otherwise every lead earned both signals' points (13 pts) regardless.
+    score += (1.0 if _truthy(row.get("has_email_signup")) else 0.0) * w["has_email_signup"]
+    score += (1.0 if _truthy(row.get("has_ecommerce")) else 0.0) * w["has_ecommerce"]
 
     # No normalization — score reflects what was actually earned on 100-pt scale.
     # Missing signals simply don't contribute; leads aren't penalized or inflated.
 
     return round(score, 1)
+
+
+def _truthy(val) -> bool:
+    """CSV-safe boolean: only explicit true values count."""
+    if isinstance(val, str):
+        return val.strip().lower() in ("true", "1", "yes")
+    if val is None or (isinstance(val, float) and np.isnan(val)):
+        return False
+    return bool(val)
 
 
 def score_leads(df: pd.DataFrame) -> pd.DataFrame:

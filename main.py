@@ -137,12 +137,13 @@ def merge_discovery(existing_path: str, new_df: pd.DataFrame) -> pd.DataFrame:
 
     combined = pd.concat([existing, new_df], ignore_index=True)
 
-    # Dedup by phone
+    # Dedup by phone. Every lead WITHOUT a phone normalizes to the same ""
+    # key, so deduplicating before splitting silently kept only the first
+    # such lead. Split first, then dedupe each group by its proper key.
     combined["phone_clean"] = combined["phone"].astype(str).str.replace(r"[^\d]", "", regex=True)
-    df_deduped = combined.drop_duplicates(subset=["phone_clean"], keep="first")
-    mask_no_phone = df_deduped["phone_clean"] == ""
-    df_with_phone = df_deduped[~mask_no_phone]
-    df_no_phone = df_deduped[mask_no_phone].drop_duplicates(
+    mask_no_phone = combined["phone_clean"] == ""
+    df_with_phone = combined[~mask_no_phone].drop_duplicates(subset=["phone_clean"], keep="first")
+    df_no_phone = combined[mask_no_phone].drop_duplicates(
         subset=["name", "address"], keep="first"
     )
     merged = pd.concat([df_with_phone, df_no_phone], ignore_index=True)
