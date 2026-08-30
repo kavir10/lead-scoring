@@ -273,9 +273,15 @@ def enrich_websites(df: pd.DataFrame) -> pd.DataFrame:
     # Final save of complete df
     _atomic_csv_write(df, output_path)
 
-    reachable = df["website_reachable"].astype(bool).sum() if "website_reachable" in df.columns else 0
-    ecom = df["has_ecommerce"].astype(bool).sum() if "has_ecommerce" in df.columns else 0
-    email = df["has_email_signup"].astype(bool).sum() if "has_email_signup" in df.columns else 0
+    # astype(bool) on CSV strings would count "False" as True
+    def _csv_bool_sum(col: str) -> int:
+        if col not in df.columns:
+            return 0
+        return int(df[col].map(lambda v: str(v).strip().lower() in ("true", "1", "yes")).sum())
+
+    reachable = _csv_bool_sum("website_reachable")
+    ecom = _csv_bool_sum("has_ecommerce")
+    email = _csv_bool_sum("has_email_signup")
     ig = (df["instagram_url"] != "").sum() if "instagram_url" in df.columns else 0
     fb = (df["facebook_url"] != "").sum() if "facebook_url" in df.columns else 0
 
