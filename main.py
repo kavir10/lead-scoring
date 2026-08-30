@@ -138,11 +138,14 @@ def merge_discovery(existing_path: str, new_df: pd.DataFrame) -> pd.DataFrame:
     combined = pd.concat([existing, new_df], ignore_index=True)
 
     # Dedup by phone
-    combined["phone_clean"] = combined["phone"].astype(str).str.replace(r"[^\d]", "", regex=True)
-    df_deduped = combined.drop_duplicates(subset=["phone_clean"], keep="first")
-    mask_no_phone = df_deduped["phone_clean"] == ""
-    df_with_phone = df_deduped[~mask_no_phone]
-    df_no_phone = df_deduped[mask_no_phone].drop_duplicates(
+    combined["phone_clean"] = (
+        combined["phone"].fillna("").astype(str).str.replace(r"[^\d]", "", regex=True)
+    )
+    mask_no_phone = combined["phone_clean"] == ""
+    df_with_phone = combined[~mask_no_phone].drop_duplicates(
+        subset=["phone_clean"], keep="first"
+    )
+    df_no_phone = combined[mask_no_phone].drop_duplicates(
         subset=["name", "address"], keep="first"
     )
     merged = pd.concat([df_with_phone, df_no_phone], ignore_index=True)
