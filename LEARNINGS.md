@@ -69,6 +69,14 @@ whole-animal butcher run (2026-09-25, PR #21).
   `ValueError: Invalid IPv6 URL` inside `asyncio.gather` and killed a
   4,324-row run. → Wrap per-link parsing in try/except and isolate
   exceptions per row; fill default columns for errored rows.
+- **A dead headless browser hangs the run forever, and results written only
+  at the end are lost.** An 8.6k-site verify stalled at 800/819 in the
+  Chromium retry pass (browser process gone, Python at 0% CPU awaiting
+  pages) and 30 minutes of crawling had to be redone. → Put a hard per-site
+  timeout around every fetch (`asyncio.wait_for`), append each site's result
+  to a JSONL checkpoint as it finishes, and make reruns resume from it
+  (`verify_whole_animal.py --cache`, on by default). If a log line hasn't
+  moved in 5+ minutes, check `ps` for the browser before waiting longer.
 - Posted hours come in many formats: "Open now • Closes at 7PM",
   "Wednesday through Friday 4:00-10:00", "Tue - Sat 10-6", "Location & Hours".
   Regexes that require am/pm miss half of them. Prefer Maps hours.
@@ -120,6 +128,10 @@ whole-animal butcher run (2026-09-25, PR #21).
   crawl time.
 
 ## Environment
+
+- `apify_client` 2.x `actor().call()` returns a `Run` object, not a dict:
+  `run["defaultDatasetId"]` raises `TypeError`. Use `run.default_dataset_id`
+  (or handle both). Pass `logger=None` to stop the actor log flooding output.
 
 - macOS has no `timeout` command. Use the tool's timeout or background jobs.
 - `load_dotenv()` with no path fails from `python - <<EOF` stdin scripts
