@@ -138,6 +138,14 @@ whole-animal butcher run (2026-09-25, PR #21).
 
 ## Environment
 
+- **macOS deletes old files under `/private/tmp`.** A worktree, venv, and
+  `.env` in the Claude scratchpad (`/private/tmp/claude-*/…/scratchpad`) lost
+  `pyvenv.cfg`, the worktree `.git` link, `.env`, and two uncommitted script
+  edits between 2026-09-25 and 09-30. → For any run that may span days, put
+  the worktree outside `/tmp` (e.g. `~/Downloads/lead-scoring-wt/<thing>`),
+  commit and push after each working change, and copy outputs out of the
+  scratchpad as soon as they're produced.
+
 - `apify_client` 2.x `actor().call()` returns a `Run` object, not a dict:
   `run["defaultDatasetId"]` raises `TypeError`. Use `run.default_dataset_id`
   (or handle both). Pass `logger=None` to stop the actor log flooding output.
