@@ -2,6 +2,13 @@
 
 Guidance for Claude Code (claude.ai/code) when working in this repo.
 
+## Before any run: read `LEARNINGS.md` (mandatory)
+
+Before running any discovery, scraping, enrichment, or list-building job,
+read `LEARNINGS.md` in the repo root and follow its pre-flight checklist.
+After the run, add any new failure or fix to it (what happened → evidence →
+rule) in the same PR as the code change.
+
 ## What this is
 
 Lead discovery, enrichment, and scoring for Table22. Independent food

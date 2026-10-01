@@ -2,6 +2,13 @@
 
 This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
 
+## Before any run: read `LEARNINGS.md` (mandatory)
+
+Before running any discovery, scraping, enrichment, or list-building job,
+read `LEARNINGS.md` in the repo root and follow its pre-flight checklist.
+After the run, add any new failure or fix to it (what happened → evidence →
+rule) in the same PR as the code change.
+
 ## What This Is
 
 Lead scoring pipeline for Table22 that finds, enriches, and scores independent food businesses (restaurants, butchers, wine stores, bakeries) as potential subscription program leads. Three-phase pipeline: Discover -> Enrich -> Score.
