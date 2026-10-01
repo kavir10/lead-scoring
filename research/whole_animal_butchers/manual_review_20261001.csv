@@ -1,0 +1,19 @@
+domain,name,decision,evidence_tier,reason
+rhodybutcher.com,Rhody Butcher,add,A: storefront unconfirmed,own-site claim; Maps listing has no street address
+bostonprovisionsmarket.com,Boston Provisions Market,add,A: storefront unconfirmed,own-site claim; Maps address is 'side of the building'
+babettestable.com,Babette's Table,add,A: storefront unconfirmed,own-site claim; no posted hours
+join-hero.com,HERO Bovino,add,A: storefront unconfirmed,own-site claim; no Maps match
+lafuentemarket.com,La Fuente Farmers Market | Restaurant | Butchery + Local Food Hub,add,A: storefront unconfirmed,own-site claim; no posted hours on Maps
+geromesmarket.com,Gerome’s Market,add,A: storefront unconfirmed,own-site claim; no posted hours on Maps
+belmontbutchery.com,Belmont Butchery,add,"B: weaker wording, hand-reviewed",promotes nose-to-tail eating (Fergus Henderson style shop)
+lakegenevacountrymeats.com,Lake Geneva Country Meats,add,"B: weaker wording, hand-reviewed",processes whole animals in its own USDA facility
+burbage-meats.com,Burbage Meats,add,"B: weaker wording, hand-reviewed","nose-to-tail products, little goes to waste"
+allhalemeatsllc.com,All Hale Meats,add,"B: weaker wording, hand-reviewed","sells everything nose to tail, made on-site"
+livermorebutchershop.com,LIVERMORE BUTCHER SHOP,add,"B: weaker wording, hand-reviewed",cuts whole hogs in-house
+lazybutcher.com,Lazy Butcher - Meat and Provisions,add,"B: weaker wording, hand-reviewed",nose-to-tail in action in the butcher case
+teodoras-boucherie.com,Teodora's Boucherie Gourmande,add,"B: weaker wording, hand-reviewed",'Nose-to-tail is stewardship' house philosophy
+echoandrig.com,Echo & Rig,add,"B: weaker wording, hand-reviewed",butchers practice a nose-to-tail approach
+primemeatsllc.com,Prime Meats,remove,,"evidence is third-party article text, repeated across 3 rows"
+fircrestmarket.com,Fircrest Market,remove,,"quote describes its supplier Cream Co., not the shop"
+cloverfarmsfl.com,cloverfarmsfl.com,remove,,"farm/online brand, no Maps listing"
+northstarbison.com,northstarbison.com,remove,,"farm/online brand, no Maps listing"

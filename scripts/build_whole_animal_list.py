@@ -119,7 +119,7 @@ def attach_maps(verified: str, lookup_out: str, out: str) -> None:
     print(f"attached Maps fields to {hit.sum()} rows; wrote {out}", file=sys.stderr)
 
 
-def filter_final(verified: str, out: str) -> None:
+def filter_final(verified: str, out: str, review: str = "") -> None:
     d = pd.read_csv(verified, dtype=str)
     d["whole_animal"] = d["whole_animal"].str.lower() == "true"
     d["links_table22"] = d["links_table22"].str.lower() == "true"
@@ -196,8 +196,25 @@ def filter_final(verified: str, out: str) -> None:
     has_addr_domains = set(dom[~no_addr])
     f = f[~(no_addr & dom.isin(has_addr_domains))]
     f = f[~(f.maps_address.isna() & f.website.map(_domain).duplicated(keep="first"))]
+    f["evidence_tier"] = "verified: own-site claim + storefront"
+    if review:
+        # Hand-review decisions (research/whole_animal_butchers/manual_review_*.csv):
+        # "remove" drops a domain; "add" pulls a candidate in with its evidence tier.
+        r = pd.read_csv(review, dtype=str)
+        drop = set(r[r.decision == "remove"].domain)
+        before = len(f)
+        f = f[~f.website.map(_domain).isin(drop)]
+        adds = r[r.decision == "add"].set_index("domain")
+        pool = d[d.website.map(_domain).isin(adds.index)].copy()
+        pool["_dom"] = pool.website.map(_domain)
+        pool = pool[~pool._dom.isin(set(f.website.map(_domain)))].drop_duplicates("_dom")
+        pool["evidence_tier"] = pool._dom.map(adds.evidence_tier)
+        pool["review_note"] = pool._dom.map(adds.reason)
+        f = pd.concat([f, pool.drop(columns="_dom")], ignore_index=True)
+        print(f"review: removed {before - len(f) + len(pool)}, added {len(pool)} "
+              f"({pool.evidence_tier.value_counts().to_dict()})", file=sys.stderr)
     f = f.sort_values(["state", "city", "name"])
-    cols = ["name", "lead_source", "vault_tier", "links_table22", "offers_share_or_box", "maps_address", "city", "state",
+    cols = ["name", "evidence_tier", "review_note", "lead_source", "vault_tier", "links_table22", "offers_share_or_box", "maps_address", "city", "state",
             "maps_phone", "website", "maps_type", "maps_rating", "maps_reviews", "maps_hours",
             "instagram", "ig_followers", "wa_source", "wa_terms", "wa_strength", "wa_evidence", "wa_evidence_url", "storefront_basis", "storefront_evidence",
             "awards", "cid"]
@@ -219,13 +236,14 @@ def main() -> None:
     f = sub.add_parser("filter")
     f.add_argument("verified")
     f.add_argument("output")
+    f.add_argument("--review", default="", help="hand-review decisions CSV (domain, decision, evidence_tier, reason)")
     args = ap.parse_args()
     if args.cmd == "merge":
         merge(args.vault_maps, args.new_files, args.output)
     elif args.cmd == "attach-maps":
         attach_maps(args.verified, args.lookup_out, args.output)
     else:
-        filter_final(args.verified, args.output)
+        filter_final(args.verified, args.output, args.review)
 
 
 if __name__ == "__main__":
