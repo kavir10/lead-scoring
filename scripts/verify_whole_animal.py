@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
+import os
 import re
 import socket
 import sys
@@ -105,9 +107,11 @@ NO_STORE_RE = re.compile(
 PAGE_HINT_RE = re.compile(
     r"about|story|who-we-are|our-|philosoph|meat|butcher|sourc|farm|visit|hours|location|find-us|contact|shop-info",
     re.I)
+IG_RE = re.compile(r"instagram\.com/([A-Za-z0-9_.]{2,30})/?(?:[?#\"']|$)", re.I)
+IG_SKIP = {"p", "reel", "reels", "explore", "stories", "accounts", "tv", "share", "sharer"}
 SKIP_HREF_RE = re.compile(r"\.(?:pdf|jpg|jpeg|png|gif|webp|mp4|zip)$|/cart|/account|/checkout|mailto:|tel:", re.I)
 
-MAX_EXTRA_PAGES = 5
+MAX_EXTRA_PAGES = 8
 
 
 def _norm_cols(df: pd.DataFrame) -> pd.DataFrame:
@@ -209,6 +213,7 @@ async def verify_one(client, sem: asyncio.Semaphore, website: str) -> dict:
         "storefront_evidence": "",
         "pages_checked": 0,
         "links_table22": False,
+        "instagram": "",
     }
     url = _normalize_url(website)
     if not url:
@@ -231,6 +236,12 @@ async def verify_one(client, sem: asyncio.Semaphore, website: str) -> dict:
                 raw.append(h)
                 pages.append((u, _text(h)[0]))
         result["links_table22"] = any("table22.com" in h.lower() for h in raw)
+        for h in raw:
+            handles = [m.group(1).lower().strip(".") for m in IG_RE.finditer(h)]
+            handles = [x for x in handles if x not in IG_SKIP]
+            if handles:
+                result["instagram"] = handles[0]
+                break
     result["pages_checked"] = len(pages)
 
     terms, snippets = [], []
@@ -272,16 +283,82 @@ async def verify_one(client, sem: asyncio.Semaphore, website: str) -> dict:
     return result
 
 
-async def _verify_all(client, df: pd.DataFrame, concurrency: int) -> pd.DataFrame:
+SITE_TIMEOUT = {"http": 90, "browser": 150}  # seconds per site, all pages included
+_CACHE: dict[str, dict] = {}
+RETRYABLE = {"unreachable", "error"}
+_NO_LIMIT = asyncio.Semaphore(10**9)  # verify_one's own gate, when the caller already holds a slot
+CANARY_HOSTS = ("google.com", "cloudflare.com")
+
+
+def _network_up() -> bool:
+    for host in CANARY_HOSTS:
+        try:
+            socket.gethostbyname(host)
+            return True
+        except OSError:
+            continue
+    return False
+
+
+async def _wait_for_network() -> None:
+    """Block while DNS is down (laptop sleep, wifi drop); returns once it's back."""
+    waited = 0
+    while not await asyncio.to_thread(_network_up):
+        if waited % 60 == 0:
+            print(f"  network down, waiting ({waited}s)", file=sys.stderr, flush=True)
+        await asyncio.sleep(10)
+        waited += 10
+_CACHE_PATH = ""
+
+
+def _load_cache(path: str) -> None:
+    """Per-site results as JSONL, appended as each site finishes, so a crash or hang loses nothing."""
+    global _CACHE_PATH
+    _CACHE_PATH = path
+    if path and os.path.exists(path):
+        with open(path) as fh:
+            for line in fh:
+                try:
+                    rec = json.loads(line)
+                    # Failures are retried on rerun: a network drop must not become a verdict.
+                    if rec["result"].get("site_status") not in RETRYABLE:
+                        _CACHE[rec["key"]] = rec["result"]
+                except (ValueError, KeyError):
+                    continue
+        print(f"cache: {len(_CACHE)} site results loaded from {path}", file=sys.stderr)
+
+
+def _save(key: str, result: dict) -> None:
+    _CACHE[key] = result
+    if _CACHE_PATH:
+        with open(_CACHE_PATH, "a") as fh:
+            fh.write(json.dumps({"key": key, "result": result}, default=str) + "\n")
+
+
+async def _verify_all(client, df: pd.DataFrame, concurrency: int, mode: str = "http") -> pd.DataFrame:
     sem = asyncio.Semaphore(concurrency)
     done = 0
 
     async def wrapped(w: str) -> dict:
         nonlocal done
-        try:
-            r = await verify_one(client, sem, w)
-        except Exception as e:  # one bad site must not sink the batch
-            r = {"site_status": "error", "wa_evidence": f"{type(e).__name__}: {e}"[:200]}
+        key = f"{mode}|{_normalize_url(w)}"
+        if key in _CACHE:
+            r = _CACHE[key]
+        else:
+            for attempt in range(3):
+                try:
+                    # A dead browser or a JS redirect loop can leave a page awaiting forever.
+                    # Take the slot first: the timeout must cover fetching, not queueing.
+                    async with sem:
+                        r = await asyncio.wait_for(verify_one(client, _NO_LIMIT, w), timeout=SITE_TIMEOUT[mode])
+                except asyncio.TimeoutError:
+                    r = {"site_status": "unreachable", "wa_evidence": f"timeout after {SITE_TIMEOUT[mode]}s"}
+                except Exception as e:  # one bad site must not sink the batch
+                    r = {"site_status": "error", "wa_evidence": f"{type(e).__name__}: {e}"[:200]}
+                if r.get("site_status") not in RETRYABLE or await asyncio.to_thread(_network_up):
+                    break
+                await _wait_for_network()  # the failure was ours, not the site's: retry
+            _save(key, r)
         done += 1
         if done % 50 == 0:
             print(f"  {done}/{len(df)}", file=sys.stderr, flush=True)
@@ -304,7 +381,7 @@ async def run_ordered(df: pd.DataFrame, concurrency: int, browser: bool = False)
             b = await pw.chromium.launch()
             context = await b.new_context(user_agent=HEADERS["User-Agent"], ignore_https_errors=True)
             try:
-                return await _verify_all(BrowserClient(context), df, concurrency)
+                return await _verify_all(BrowserClient(context), df, concurrency, mode="browser")
             finally:
                 await b.close()
 
@@ -333,6 +410,7 @@ def main() -> None:
     ap.add_argument("--concurrency", type=int, default=24)
     ap.add_argument("--browser", action="store_true", help="fetch everything with headless Chromium")
     ap.add_argument("--no-retry", action="store_true", help="skip the automatic Chromium retry pass")
+    ap.add_argument("--cache", default="", help="JSONL of per-site results; default OUTPUT.cache.jsonl")
     args = ap.parse_args()
 
     df = _norm_cols(pd.read_csv(args.input, dtype=str))
@@ -341,6 +419,7 @@ def main() -> None:
     df = df[~df["state"].isin(BANNED_STATES)].copy()
     print(f"{before} rows, {before - len(df)} dropped for excluded states, verifying {len(df)}", file=sys.stderr)
 
+    _load_cache(args.cache or args.output.rsplit(".", 1)[0] + ".cache.jsonl")
     checks = asyncio.run(run_ordered(df, args.concurrency, args.browser))
     if not args.browser and not args.no_retry:
         retry = checks.index[
@@ -353,6 +432,7 @@ def main() -> None:
             better = again.index[(again.site_status == "ok") & ~(
                 checks.loc[again.index, "whole_animal"] & ~again.whole_animal)]
             checks.loc[better] = again.loc[better]
+    asyncio.run(_wait_for_network())  # DNS verdicts below are meaningless while offline
     checks["site_status"] = checks["site_status"].where(
         checks.site_status != "unreachable",
         [("dead_domain" if not _resolves(w) else "unreachable") for w in df.loc[checks.index, "website"].fillna("")])

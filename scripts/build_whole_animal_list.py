@@ -2,9 +2,13 @@
 Merge the vault Maps lookup with the new Maps sweep into one candidate list,
 and (after verify_whole_animal.py has run on it) filter to the final list.
 
-    python scripts/build_whole_animal_list.py merge  VAULT_MAPS.csv NEW_MAPS.csv CANDIDATES.csv
+    python scripts/build_whole_animal_list.py merge VAULT_MAPS.csv NEW_MAPS.csv [MORE.csv ...] CANDIDATES.csv
     python scripts/verify_whole_animal.py CANDIDATES.csv VERIFIED.csv
-    python scripts/build_whole_animal_list.py filter VERIFIED.csv FINAL.csv
+    python scripts/instagram_whole_animal.py VERIFIED.csv VERIFIED_IG.csv
+    # directory rows that passed: Maps lookup, then attach
+    python scripts/discover_whole_animal.py lookup DIR_STRONG.csv DIR_MAPS.csv
+    python scripts/build_whole_animal_list.py attach-maps VERIFIED_IG.csv DIR_MAPS.csv VERIFIED_FULL.csv
+    python scripts/build_whole_animal_list.py filter VERIFIED_FULL.csv FINAL.csv
 
 Final-list rule (agreed with Kavir, 2026-09-25):
   - state not in HI, IN, IA, KS, NV, ND, SD
@@ -61,7 +65,7 @@ def _domain(url) -> str:
     return urlparse(url).netloc.removeprefix("www.")
 
 
-def merge(vault_maps: str, new_maps: str, out: str) -> None:
+def merge(vault_maps: str, new_files: list[str], out: str) -> None:
     v = pd.read_csv(vault_maps, dtype=str)
     v["lead_source"] = "existing (vault ICP list)"
     v["vault_tier"] = v["tier"]
@@ -70,23 +74,49 @@ def merge(vault_maps: str, new_maps: str, out: str) -> None:
     v["website"] = v["maps_website"].where(v["maps_website"].fillna("").str.len() > 0, v["website"])
     v["state"] = v["maps_state"].where(v["maps_state"].fillna("").str.len() > 0, v["state"])
 
-    n = pd.read_csv(new_maps, dtype=str)
-    n["lead_source"] = "new (Maps sweep)"
-    n["maps_match"] = "ok"
-
-    vault_cids = set(v["cid"].dropna())
-    vault_domains = {d for d in v["website"].map(_domain) if d} | {d for d in v["vault_website"].map(_domain) if d}
-    before = len(n)
-    n = n[~n["cid"].isin(vault_cids) & ~n["website"].map(_domain).isin(vault_domains)]
-    print(f"new sweep: {before} listings, {before - len(n)} already on the vault list, {len(n)} net new",
-          file=sys.stderr)
+    seen_cids = set(v["cid"].dropna())
+    seen_domains = {d for d in v["website"].map(_domain) if d} | {d for d in v["vault_website"].map(_domain) if d}
+    frames = [v]
+    for path in new_files:
+        n = pd.read_csv(path, dtype=str)
+        if "cid" in n:  # Maps sweep output
+            n["lead_source"] = "new (Maps sweep)"
+            n["maps_match"] = "ok"
+        else:  # directory / source-lane output (name, website, city, state); Maps looked up later
+            n["lead_source"] = "new (directories)"
+            n["cid"] = pd.NA
+        dom = n["website"].map(_domain)
+        before = len(n)
+        keep = ~n["cid"].isin(seen_cids) & ~(dom.isin(seen_domains) & (dom != ""))
+        n = n[keep]
+        n = n[n.cid.isna() | ~n.cid.duplicated()]
+        seen_cids |= set(n["cid"].dropna())
+        seen_domains |= {d for d in n["website"].map(_domain) if d}
+        print(f"{path}: {before} rows, {before - len(n)} already seen, {len(n)} net new", file=sys.stderr)
+        frames.append(n)
 
     cols = ["lead_source", "vault_tier", "name", "website", "vault_website", "city", "state", "awards",
             "maps_match", "maps_name", "maps_address", "maps_type", "maps_types", "maps_phone",
             "maps_rating", "maps_reviews", "maps_hours", "cid", "search_query", "search_city"]
-    allrows = pd.concat([v, n], ignore_index=True).reindex(columns=cols)
+    allrows = pd.concat(frames, ignore_index=True).reindex(columns=cols)
     allrows.to_csv(out, index=False)
     print(f"wrote {len(allrows)} candidates to {out}", file=sys.stderr)
+    print(allrows.lead_source.value_counts().to_string(), file=sys.stderr)
+
+
+def attach_maps(verified: str, lookup_out: str, out: str) -> None:
+    """Fill Maps fields for rows (directory leads) that were looked up after verification."""
+    d = pd.read_csv(verified, dtype=str)
+    lk = pd.read_csv(lookup_out, dtype=str)
+    maps_cols = [c for c in lk.columns if c.startswith("maps_") or c == "cid"]
+    key = lambda df: df["name"].fillna("") + "|" + df["website"].fillna("")
+    lk = lk.assign(_k=key(lk)).drop_duplicates("_k").set_index("_k")[maps_cols]
+    d["_k"] = key(d)
+    hit = d["_k"].isin(lk.index)
+    for c in maps_cols:
+        d.loc[hit, c] = d.loc[hit, "_k"].map(lk[c])
+    d.drop(columns="_k").to_csv(out, index=False)
+    print(f"attached Maps fields to {hit.sum()} rows; wrote {out}", file=sys.stderr)
 
 
 def filter_final(verified: str, out: str) -> None:
@@ -169,9 +199,9 @@ def filter_final(verified: str, out: str) -> None:
     f = f.sort_values(["state", "city", "name"])
     cols = ["name", "lead_source", "vault_tier", "links_table22", "offers_share_or_box", "maps_address", "city", "state",
             "maps_phone", "website", "maps_type", "maps_rating", "maps_reviews", "maps_hours",
-            "wa_terms", "wa_strength", "wa_evidence", "wa_evidence_url", "storefront_basis", "storefront_evidence",
+            "instagram", "ig_followers", "wa_source", "wa_terms", "wa_strength", "wa_evidence", "wa_evidence_url", "storefront_basis", "storefront_evidence",
             "awards", "cid"]
-    f[cols].to_csv(out, index=False)
+    f.reindex(columns=cols).to_csv(out, index=False)
     print(f"wrote {len(f)} leads to {out}", file=sys.stderr)
 
 
@@ -180,14 +210,20 @@ def main() -> None:
     sub = ap.add_subparsers(dest="cmd", required=True)
     m = sub.add_parser("merge")
     m.add_argument("vault_maps")
-    m.add_argument("new_maps")
+    m.add_argument("new_files", nargs="+", help="Maps sweep and/or directory CSVs")
     m.add_argument("output")
+    am = sub.add_parser("attach-maps")
+    am.add_argument("verified")
+    am.add_argument("lookup_out")
+    am.add_argument("output")
     f = sub.add_parser("filter")
     f.add_argument("verified")
     f.add_argument("output")
     args = ap.parse_args()
     if args.cmd == "merge":
-        merge(args.vault_maps, args.new_maps, args.output)
+        merge(args.vault_maps, args.new_files, args.output)
+    elif args.cmd == "attach-maps":
+        attach_maps(args.verified, args.lookup_out, args.output)
     else:
         filter_final(args.verified, args.output)
 

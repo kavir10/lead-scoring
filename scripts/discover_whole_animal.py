@@ -35,6 +35,13 @@ from discover import is_chain, parse_town_state  # noqa: E402
 BANNED_STATES = {"HI", "IN", "IA", "KS", "NV", "ND", "SD"}
 
 CRAFT_QUERIES = ["whole animal butcher", "nose to tail butcher"]
+# Serper Maps returns at most 20 results and ignores `page`, so coverage comes
+# from query variety and finer locations, not pagination (see LEARNINGS.md).
+BROAD_QUERIES = ["butcher shop", "artisan butcher", "local butcher shop", "craft butcher"]
+NEIGHBORHOOD_FILES = [
+    "research/trendy_neighborhoods/trendy_neighborhoods_top100_us_20260531.csv",
+    "research/trendy_neighborhoods/trendy_neighborhoods_uncovered_cities_20260601.csv",
+]
 
 # Google place types that are walk-in retail. Processors and wholesalers are
 # kept only if their own website shows retail hours (decided downstream).
@@ -128,9 +135,20 @@ def lookup(df: pd.DataFrame) -> pd.DataFrame:
     return pd.concat([df.reset_index(drop=True), pd.DataFrame(found)], axis=1)
 
 
-def discover_new(max_cities: int = 0) -> pd.DataFrame:
+def _neighborhood_tasks(query: str) -> list[tuple[str, str]]:
+    """One task per trendy neighborhood; the neighborhood goes in the query, the city in location."""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    frames = [pd.read_csv(os.path.join(root, f), dtype=str) for f in NEIGHBORHOOD_FILES]
+    n = pd.concat(frames)[["city", "state", "neighborhood"]].dropna().drop_duplicates()
+    n = n[~n.state.isin(BANNED_STATES)]
+    return [(f"{query} in {r.neighborhood}, {r.city} {r.state}", f"{r.city}, {r.state}") for r in n.itertuples()]
+
+
+def discover_new(max_cities: int = 0, queries: list[str] | None = None, neighborhoods: bool = False) -> pd.DataFrame:
     cities = CITIES[:max_cities] if max_cities else CITIES
-    tasks = [(q, c) for c in cities for q in CRAFT_QUERIES]
+    tasks = [(q, c) for c in cities for q in (queries or CRAFT_QUERIES)]
+    if neighborhoods:
+        tasks += _neighborhood_tasks("butcher shop")
     print(f"{len(tasks)} Maps searches", file=sys.stderr)
 
     def one(t):
@@ -173,14 +191,16 @@ def main() -> None:
     b = sub.add_parser("discover")
     b.add_argument("output")
     b.add_argument("--max-cities", type=int, default=0)
+    b.add_argument("--broad", action="store_true", help="use BROAD_QUERIES instead of CRAFT_QUERIES")
+    b.add_argument("--neighborhoods", action="store_true", help="add one 'butcher shop' search per trendy neighborhood")
     args = ap.parse_args()
 
-    load_dotenv()
+    load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"))
     if args.cmd == "lookup":
         out = lookup(pd.read_csv(args.input, dtype=str))
         print(out.maps_match.value_counts().to_string(), file=sys.stderr)
     else:
-        out = discover_new(args.max_cities)
+        out = discover_new(args.max_cities, BROAD_QUERIES if args.broad else None, args.neighborhoods)
     out.to_csv(args.output, index=False)
     print(f"wrote {len(out)} rows to {args.output}", file=sys.stderr)
 
